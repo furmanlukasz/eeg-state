@@ -335,6 +335,8 @@ def load_cached_data(
     Uses the same cache created by the training data loader.
     NOTE: This skips HF validation since cache only contains phase data.
 
+    Memory-efficient: Scans first to count chunks, then pre-allocates and fills.
+
     Args:
         data_dir: Root data directory
         cache_dir: Cache subdirectory name
@@ -359,13 +361,15 @@ def load_cached_data(
             "Run training first to create the cache, or use load_all_data() instead."
         )
 
-    all_phase = []
-    all_subject_ids = []
-    all_labels = []
+    # Phase 1: Scan to collect file info and count total chunks (no data loading)
+    logger.info("Phase 1: Scanning cache files...")
+    file_infos = []  # (pt_file, subject_idx, label)
+    chunk_counts = []
     sfreq = None
     n_channels = None
+    n_features = None
+    n_times = None
 
-    # Find cached files by group
     subject_idx = 0
     for group_dir, group_path in [("HID", "HID/FILT"), ("MCI", "MCI/FILT")]:
         group_cache = cache_path / group_path
@@ -375,61 +379,108 @@ def load_cached_data(
 
         label = 0 if group_dir == "HID" else 1
 
-        # Find all subject directories in cache
         for subject_cache in sorted(group_cache.iterdir()):
             if not subject_cache.is_dir():
                 continue
 
-            # Find all .pt files for this subject
             pt_files = list(subject_cache.glob("*.pt"))
             if not pt_files:
                 continue
 
-            subject_chunks = []
+            subject_n_chunks = 0
             for pt_file in pt_files:
                 try:
-                    data = torch.load(pt_file, weights_only=True)
-                    chunks = data["chunks"].numpy()  # (n_chunks, features, time)
-                    subject_chunks.append(chunks)
+                    # Quick metadata-only load
+                    data = torch.load(pt_file, weights_only=True, map_location="cpu")
+                    chunks_shape = data["chunks"].shape
+                    n_chunks = chunks_shape[0]
 
-                    # Get metadata from first file
+                    if n_features is None:
+                        n_features = chunks_shape[1]
+                        n_times = chunks_shape[2]
+
                     if sfreq is None and "info" in data:
                         info = data["info"]
                         sfreq = info.get("sfreq", 250.0)
                         n_channels = info.get("n_channels", 256)
+
+                    file_infos.append((pt_file, subject_idx, label))
+                    chunk_counts.append(n_chunks)
+                    subject_n_chunks += n_chunks
+
+                    # Free memory immediately
+                    del data
+
                 except Exception as e:
-                    logger.warning(f"Failed to load {pt_file}: {e}")
+                    logger.warning(f"Failed to scan {pt_file}: {e}")
                     continue
 
-            if subject_chunks:
-                subject_data = np.concatenate(subject_chunks, axis=0)
-                n_chunks = len(subject_data)
-                all_phase.append(subject_data)
-                all_subject_ids.extend([subject_idx] * n_chunks)
-                all_labels.extend([label] * n_chunks)
-                logger.info(f"  Subject {subject_idx} ({group_dir}): {n_chunks} chunks")
+            if subject_n_chunks > 0:
+                logger.info(f"  Subject {subject_idx} ({group_dir}): {subject_n_chunks} chunks")
                 subject_idx += 1
 
-    if not all_phase:
+    if not file_infos:
         raise ValueError(f"No cached data found in {cache_path}!")
 
-    phase_chunks = np.concatenate(all_phase, axis=0)
-    subject_ids = np.array(all_subject_ids)
-    labels = np.array(all_labels)
+    total_chunks = sum(chunk_counts)
+
+    # Calculate memory needed
+    mem_needed_gb = (total_chunks * n_features * n_times * 4) / (1024**3)
+    logger.info(f"Phase 2: Pre-allocating arrays for {total_chunks} chunks (~{mem_needed_gb:.1f} GB)")
+
+    # Phase 2: Pre-allocate arrays using memory-mapped file if large
+    if mem_needed_gb > 10:
+        # Use memory-mapped file to avoid OOM
+        import tempfile
+        logger.info("  Using memory-mapped file to avoid OOM...")
+        mmap_file = tempfile.NamedTemporaryFile(delete=False, suffix='.mmap')
+        phase_chunks = np.memmap(
+            mmap_file.name, dtype=np.float32, mode='w+',
+            shape=(total_chunks, n_features, n_times)
+        )
+    else:
+        phase_chunks = np.zeros((total_chunks, n_features, n_times), dtype=np.float32)
+
+    subject_ids = np.zeros(total_chunks, dtype=np.int32)
+    labels_arr = np.zeros(total_chunks, dtype=np.int32)
+
+    # Phase 3: Fill arrays in-place
+    logger.info("Phase 3: Loading data into pre-allocated arrays...")
+    current_idx = 0
+    for i, ((pt_file, subj_idx, label), n_chunks) in enumerate(zip(file_infos, chunk_counts)):
+        try:
+            data = torch.load(pt_file, weights_only=True, map_location="cpu")
+            chunks = data["chunks"].numpy()
+
+            end_idx = current_idx + n_chunks
+            phase_chunks[current_idx:end_idx] = chunks
+            subject_ids[current_idx:end_idx] = subj_idx
+            labels_arr[current_idx:end_idx] = label
+            current_idx = end_idx
+
+            # Free memory
+            del data, chunks
+
+            if (i + 1) % 100 == 0:
+                logger.info(f"  Loaded {i + 1}/{len(file_infos)} files...")
+
+        except Exception as e:
+            logger.warning(f"Failed to load {pt_file}: {e}")
+            current_idx += n_chunks
 
     # Estimate channel names if not available
     if n_channels is None:
         phase_channels = 3 if include_amplitude else 2
-        n_channels = phase_chunks.shape[1] // phase_channels
+        n_channels = n_features // phase_channels
     channel_names = [f"E{i}" for i in range(n_channels)]
 
     if sfreq is None:
-        sfreq = 250.0  # Default assumption
+        sfreq = 250.0
 
-    logger.info(f"Total: {len(phase_chunks)} segments from {subject_idx} subjects")
-    logger.info(f"  HC: {(labels == 0).sum()} segments, MCI: {(labels == 1).sum()} segments")
+    logger.info(f"Loaded: {total_chunks} segments from {subject_idx} subjects")
+    logger.info(f"  HC: {(labels_arr == 0).sum()} segments, MCI: {(labels_arr == 1).sum()} segments")
 
-    return phase_chunks, subject_ids, labels, channel_names, sfreq
+    return phase_chunks, subject_ids, labels_arr, channel_names, sfreq
 
 
 def compute_latent_trajectories(
