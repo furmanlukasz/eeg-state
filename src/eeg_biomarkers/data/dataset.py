@@ -5,7 +5,9 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Literal
 import logging
-import gc
+import os
+from concurrent.futures import ProcessPoolExecutor, as_completed
+from functools import partial
 
 import numpy as np
 import torch
@@ -20,6 +22,54 @@ from eeg_biomarkers.data.preprocessing import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+def _load_single_file(args: tuple, preprocess_cfg: dict, model_cfg: dict) -> dict | None:
+    """
+    Load and preprocess a single EEG file. Used for parallel processing.
+
+    Args:
+        args: Tuple of (fif_file_path, subject_id, group_idx, group_name)
+        preprocess_cfg: Preprocessing config dict
+        model_cfg: Model config dict
+
+    Returns:
+        Dict with chunks, mask, subject_id, group_idx or None if failed
+    """
+    fif_file, subject_id, group_idx, group_name = args
+    fif_file = Path(fif_file)  # Convert back from string
+
+    try:
+        # Load and preprocess
+        raw = load_eeg_file(
+            fif_file,
+            filter_low=preprocess_cfg["filter_low"],
+            filter_high=preprocess_cfg["filter_high"],
+            reference=preprocess_cfg["reference"],
+            notch_freq=preprocess_cfg["notch_freq"],
+        )
+
+        # Extract phase chunks
+        chunks, mask, _ = prepare_phase_chunks(
+            raw,
+            chunk_duration=preprocess_cfg["chunk_duration"],
+            chunk_overlap=preprocess_cfg["chunk_overlap"],
+            include_amplitude=model_cfg["include_amplitude"],
+        )
+
+        # Convert to float32 to save memory
+        chunks = chunks.astype(np.float32)
+
+        return {
+            "chunks": chunks,
+            "mask": mask,
+            "subject_id": subject_id,
+            "group_idx": group_idx,
+            "n_chunks": chunks.shape[0],
+        }
+
+    except Exception as e:
+        return {"error": str(e), "file": fif_file.name}
 
 
 class EEGDataset(Dataset):
@@ -142,49 +192,56 @@ class EEGDataModule:
 
         logger.info(f"Found {len(files_to_process)} EEG files to process")
 
-        # Second pass: load files with progress bar
+        # Prepare config dicts for worker processes (OmegaConf can't be pickled)
+        preprocess_cfg = {
+            "filter_low": self.cfg.data.preprocessing.filter_low,
+            "filter_high": self.cfg.data.preprocessing.filter_high,
+            "reference": self.cfg.data.preprocessing.reference,
+            "notch_freq": self.cfg.data.preprocessing.notch_freq,
+            "chunk_duration": self.cfg.data.preprocessing.chunk_duration,
+            "chunk_overlap": self.cfg.data.preprocessing.chunk_overlap,
+        }
+        model_cfg = {
+            "include_amplitude": self.cfg.model.phase.include_amplitude,
+        }
+
+        # Convert Path objects to strings for pickling
+        files_to_process_str = [
+            (str(f), sid, gidx, gname) for f, sid, gidx, gname in files_to_process
+        ]
+
+        # Determine number of workers (use all CPUs, but cap at 16 to avoid memory issues)
+        n_workers = min(os.cpu_count() or 4, 16)
+        logger.info(f"Loading data with {n_workers} parallel workers")
+
+        # Load files in parallel
         n_failed = 0
-        with tqdm(files_to_process, desc="Loading EEG data", unit="file") as pbar:
-            for fif_file, subject_id, group_idx, group_name in pbar:
-                pbar.set_postfix(subject=subject_id[:15], group=group_name)
-                try:
-                    # Load and preprocess
-                    raw = load_eeg_file(
-                        fif_file,
-                        filter_low=self.cfg.data.preprocessing.filter_low,
-                        filter_high=self.cfg.data.preprocessing.filter_high,
-                        reference=self.cfg.data.preprocessing.reference,
-                        notch_freq=self.cfg.data.preprocessing.notch_freq,
-                    )
+        load_func = partial(_load_single_file, preprocess_cfg=preprocess_cfg, model_cfg=model_cfg)
 
-                    # Extract phase chunks
-                    chunks, mask, _ = prepare_phase_chunks(
-                        raw,
-                        chunk_duration=self.cfg.data.preprocessing.chunk_duration,
-                        chunk_overlap=self.cfg.data.preprocessing.chunk_overlap,
-                        include_amplitude=self.cfg.model.phase.include_amplitude,
-                    )
+        with ProcessPoolExecutor(max_workers=n_workers) as executor:
+            # Submit all jobs
+            futures = {executor.submit(load_func, args): args for args in files_to_process_str}
 
-                    # Convert to float32 immediately to save memory (default is float64)
-                    chunks = chunks.astype(np.float32)
+            # Process results as they complete with progress bar
+            with tqdm(total=len(futures), desc="Loading EEG data", unit="file") as pbar:
+                for future in as_completed(futures):
+                    result = future.result()
 
-                    n_chunks = chunks.shape[0]
-                    all_chunks.append(chunks)
-                    all_masks.append(mask)
-                    all_labels.extend([group_idx] * n_chunks)
-                    all_subject_ids.extend([subject_id] * n_chunks)
+                    if result is None:
+                        n_failed += 1
+                    elif "error" in result:
+                        n_failed += 1
+                        if n_failed <= 5:
+                            logger.warning(f"Failed to load {result['file']}: {result['error']}")
+                        elif n_failed == 6:
+                            logger.warning("Suppressing further load warnings...")
+                    else:
+                        all_chunks.append(result["chunks"])
+                        all_masks.append(result["mask"])
+                        all_labels.extend([result["group_idx"]] * result["n_chunks"])
+                        all_subject_ids.extend([result["subject_id"]] * result["n_chunks"])
 
-                    # Free memory
-                    del raw, chunks, mask
-                    gc.collect()
-
-                except Exception as e:
-                    n_failed += 1
-                    # Only log first few failures to avoid spam
-                    if n_failed <= 5:
-                        logger.warning(f"Failed to load {fif_file.name}: {e}")
-                    elif n_failed == 6:
-                        logger.warning("Suppressing further load warnings...")
+                    pbar.update(1)
 
         if n_failed > 0:
             logger.warning(f"Total files failed to load: {n_failed}")
