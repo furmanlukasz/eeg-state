@@ -63,6 +63,7 @@ from sklearn.preprocessing import StandardScaler
 from xgboost import XGBClassifier
 
 from eeg_biomarkers.data.preprocessing import load_eeg_file, prepare_phase_chunks
+from eeg_biomarkers.data.dataset import get_cache_key, CachedFileDataset
 from eeg_biomarkers.models import ConvLSTMAutoencoder
 from eeg_biomarkers.analysis.rqa import compute_rqa_features, compute_rqa_from_distance_matrix, RQAFeatures
 from eeg_biomarkers.analysis.artifact_control import (
@@ -127,6 +128,10 @@ class ExperimentConfig:
 
     # Minimum subjects per class for meaningful AUC (critic agent recommendation #6)
     min_subjects_per_class: int = 20  # Below this, treat AUC as smoke test only
+
+    # Caching options
+    use_cache: bool = False  # Use cached preprocessed data (faster, skips HF validation)
+    cache_dir: str = "preprocessed_cache"
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -316,6 +321,115 @@ def load_all_data(
     logger.info(f"  Nyquist: {sfreq/2} Hz - HF2 band (70-110 Hz) is {'accessible' if 110 < sfreq/2 else 'NOT accessible'}")
 
     return raw_chunks_hf1, raw_chunks_hf2, phase_chunks, subject_ids, labels, channel_names, sfreq
+
+
+def load_cached_data(
+    data_dir: Path,
+    cache_dir: str = "preprocessed_cache",
+    cache_key: str | None = None,
+    include_amplitude: bool = False,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, list[str], float]:
+    """
+    Load preprocessed data from cache (FAST - skips MNE preprocessing).
+
+    Uses the same cache created by the training data loader.
+    NOTE: This skips HF validation since cache only contains phase data.
+
+    Args:
+        data_dir: Root data directory
+        cache_dir: Cache subdirectory name
+        cache_key: Cache key from preprocessing config (auto-detected if None)
+        include_amplitude: Whether amplitude is included in cached data
+
+    Returns:
+        phase_chunks: (n_total_segments, n_features, n_times) - phase data
+        subject_ids: (n_total_segments,) - subject index
+        labels: (n_total_segments,) - 0=HC, 1=MCI
+        channel_names: list of channel names (estimated)
+        sfreq: sampling frequency (estimated from chunk size)
+    """
+    logger.info(f"Loading CACHED data from {data_dir / cache_dir}")
+    logger.info("  NOTE: Skipping HF artifact validation (cache has phase only)")
+
+    cache_path = data_dir / cache_dir
+
+    if not cache_path.exists():
+        raise FileNotFoundError(
+            f"Cache directory not found: {cache_path}\n"
+            "Run training first to create the cache, or use load_all_data() instead."
+        )
+
+    all_phase = []
+    all_subject_ids = []
+    all_labels = []
+    sfreq = None
+    n_channels = None
+
+    # Find cached files by group
+    subject_idx = 0
+    for group_dir, group_path in [("HID", "HID/FILT"), ("MCI", "MCI/FILT")]:
+        group_cache = cache_path / group_path
+        if not group_cache.exists():
+            logger.warning(f"Cache group not found: {group_cache}")
+            continue
+
+        label = 0 if group_dir == "HID" else 1
+
+        # Find all subject directories in cache
+        for subject_cache in sorted(group_cache.iterdir()):
+            if not subject_cache.is_dir():
+                continue
+
+            # Find all .pt files for this subject
+            pt_files = list(subject_cache.glob("*.pt"))
+            if not pt_files:
+                continue
+
+            subject_chunks = []
+            for pt_file in pt_files:
+                try:
+                    data = torch.load(pt_file, weights_only=True)
+                    chunks = data["chunks"].numpy()  # (n_chunks, features, time)
+                    subject_chunks.append(chunks)
+
+                    # Get metadata from first file
+                    if sfreq is None and "info" in data:
+                        info = data["info"]
+                        sfreq = info.get("sfreq", 250.0)
+                        n_channels = info.get("n_channels", 256)
+                except Exception as e:
+                    logger.warning(f"Failed to load {pt_file}: {e}")
+                    continue
+
+            if subject_chunks:
+                subject_data = np.concatenate(subject_chunks, axis=0)
+                n_chunks = len(subject_data)
+                all_phase.append(subject_data)
+                all_subject_ids.extend([subject_idx] * n_chunks)
+                all_labels.extend([label] * n_chunks)
+                logger.info(f"  Subject {subject_idx} ({group_dir}): {n_chunks} chunks")
+                subject_idx += 1
+
+    if not all_phase:
+        raise ValueError(f"No cached data found in {cache_path}!")
+
+    phase_chunks = np.concatenate(all_phase, axis=0)
+    subject_ids = np.array(all_subject_ids)
+    labels = np.array(all_labels)
+
+    # Estimate channel names if not available
+    if n_channels is None:
+        phase_channels = 3 if include_amplitude else 2
+        n_channels = phase_chunks.shape[1] // phase_channels
+    channel_names = [f"E{i}" for i in range(n_channels)]
+
+    if sfreq is None:
+        sfreq = 250.0  # Default assumption
+
+    logger.info(f"Total: {len(phase_chunks)} segments from {subject_idx} subjects")
+    logger.info(f"  HC: {(labels == 0).sum()} segments, MCI: {(labels == 1).sum()} segments")
+
+    return phase_chunks, subject_ids, labels, channel_names, sfreq
 
 
 def compute_latent_trajectories(
@@ -687,6 +801,7 @@ def run_single_fold(
     latent_mode: str,
     run_null: bool = False,
     run_retention_matched: bool = True,  # NEW: compute retention-matched baseline
+    skip_hf_validation: bool = False,  # Skip HF artifact validation (when using cache)
 ) -> list[FoldResult]:
     """
     Run a single fold of the experiment.
@@ -727,20 +842,32 @@ def run_single_fold(
     mean_latents_train = latents_train.mean(axis=1)
     mean_latents_test = latents_test.mean(axis=1)
 
-    diagnostics = compute_fold_diagnostics(
-        raw_data_train=raw_train_hf2,  # Use HF2-filtered for proper HF2 analysis
-        raw_data_test=raw_test_hf2,
-        latents_train=mean_latents_train,
-        latents_test=mean_latents_test,
-        sfreq=sfreq,
-        fold_idx=fold_idx,
-        channel_names=channel_names,
-        train_subject_ids=subj_train,
-        test_subject_ids=subj_test,
-    )
+    # Skip HF validation when using cached data
+    if skip_hf_validation:
+        diagnostics = FoldDiagnosticReport(
+            fold_idx=fold_idx,
+            hf1_correlation_raw=None,
+            hf1_correlation_residualized=None,
+            hf2_correlation_raw=None,
+            hf1_temporal_central_ratio=None,
+            hf1_state_prediction_accuracy=None,
+        )
+    else:
+        diagnostics = compute_fold_diagnostics(
+            raw_data_train=raw_train_hf2,  # Use HF2-filtered for proper HF2 analysis
+            raw_data_test=raw_test_hf2,
+            latents_train=mean_latents_train,
+            latents_test=mean_latents_test,
+            sfreq=sfreq,
+            fold_idx=fold_idx,
+            channel_names=channel_names,
+            train_subject_ids=subj_train,
+            test_subject_ids=subj_test,
+        )
 
     # Apply residualization to latent TRAJECTORIES if needed
-    if latent_mode == "residualized":
+    # Skip residualization when using cache (no raw data for HF computation)
+    if latent_mode == "residualized" and not skip_hf_validation:
         # Use HF1-filtered data for residualization (matches what autoencoder sees)
         hf_train = compute_hf_power(raw_train_hf1, sfreq, band=(30.0, 48.0), method="welch")
         hf_test = compute_hf_power(raw_test_hf1, sfreq, band=(30.0, 48.0), method="welch")
@@ -751,6 +878,8 @@ def run_single_fold(
             mean_latents_train, mean_latents_test,
             hf_train.hf_power, hf_test.hf_power
         )
+    elif latent_mode == "residualized" and skip_hf_validation:
+        logger.info("    Skipping residualization (no raw data in cache mode)")
         # For now, use residualized means for clustering, raw trajectories for RQA
         # A more sophisticated approach would residualize each timepoint
 
@@ -1073,14 +1202,28 @@ def run_experiment(config: ExperimentConfig) -> pd.DataFrame:
 
     # Load data - now with amplitude support based on checkpoint config
     data_dir = Path(config.data_dir)
-    raw_chunks_hf1, raw_chunks_hf2, phase_chunks, subject_ids, labels, channel_names, sfreq = load_all_data(
-        data_dir,
-        config.chunk_duration,
-        config.filter_low,
-        config.filter_high,
-        hf2_filter_high=120.0,  # Allow HF2 (70-110 Hz) computation
-        include_amplitude=include_amplitude,  # Match checkpoint config!
-    )
+
+    if config.use_cache:
+        # FAST: Load from cache (skips HF validation)
+        phase_chunks, subject_ids, labels, channel_names, sfreq = load_cached_data(
+            data_dir,
+            cache_dir=config.cache_dir,
+            include_amplitude=include_amplitude,
+        )
+        # Create dummy raw arrays (not used when skip_hf_validation=True)
+        raw_chunks_hf1 = np.zeros((len(phase_chunks), 1, 1), dtype=np.float32)
+        raw_chunks_hf2 = np.zeros((len(phase_chunks), 1, 1), dtype=np.float32)
+        logger.info("Using CACHED data - HF artifact validation will be skipped")
+    else:
+        # SLOW: Load from raw files with full preprocessing
+        raw_chunks_hf1, raw_chunks_hf2, phase_chunks, subject_ids, labels, channel_names, sfreq = load_all_data(
+            data_dir,
+            config.chunk_duration,
+            config.filter_low,
+            config.filter_high,
+            hf2_filter_high=120.0,  # Allow HF2 (70-110 Hz) computation
+            include_amplitude=include_amplitude,  # Match checkpoint config!
+        )
 
     # Create model with checkpoint's config
     n_channels = phase_chunks.shape[1] // phase_channels
@@ -1167,7 +1310,10 @@ def run_experiment(config: ExperimentConfig) -> pd.DataFrame:
             ):
                 logger.info(f"Fold {fold_idx + 1}/{config.n_folds}")
 
-                for latent_mode in ["raw", "residualized"]:
+                # When using cache, only run "raw" mode (no residualization without raw data)
+                latent_modes = ["raw"] if config.use_cache else ["raw", "residualized"]
+
+                for latent_mode in latent_modes:
                     # Real run
                     results = run_single_fold(
                         fold_idx=fold_idx,
@@ -1185,6 +1331,7 @@ def run_experiment(config: ExperimentConfig) -> pd.DataFrame:
                         rr_target=rr_target,
                         latent_mode=latent_mode,
                         run_null=False,
+                        skip_hf_validation=config.use_cache,
                     )
                     all_results.extend(results)
 
@@ -1206,6 +1353,7 @@ def run_experiment(config: ExperimentConfig) -> pd.DataFrame:
                             rr_target=rr_target,
                             latent_mode=latent_mode,
                             run_null=True,
+                            skip_hf_validation=config.use_cache,
                         )
                         all_results.extend(null_results)
 
@@ -1229,6 +1377,7 @@ def run_experiment(config: ExperimentConfig) -> pd.DataFrame:
                             rr_target=rr_target,
                             latent_mode=latent_mode,
                             run_null=False,
+                            skip_hf_validation=config.use_cache,
                         )
                         # Mark as random model results
                         for r in random_results:
@@ -1438,6 +1587,10 @@ def main():
     parser.add_argument("--no-null-model", action="store_true", help="Skip null model runs")
     parser.add_argument("--no-compare-random", action="store_true",
                        help="Skip trained-vs-random comparison (faster but less diagnostic)")
+    parser.add_argument("--use-cache", action="store_true",
+                       help="Use cached preprocessed data (FAST, skips HF artifact validation)")
+    parser.add_argument("--cache-dir", default="preprocessed_cache",
+                       help="Cache directory name (default: preprocessed_cache)")
 
     args = parser.parse_args()
 
@@ -1449,6 +1602,8 @@ def main():
         n_seeds=args.n_seeds,
         run_null_model=not args.no_null_model,
         compare_random=not args.no_compare_random,
+        use_cache=args.use_cache,
+        cache_dir=args.cache_dir,
     )
 
     # Run experiment
