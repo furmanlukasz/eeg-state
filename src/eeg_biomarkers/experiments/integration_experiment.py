@@ -323,50 +323,29 @@ def load_all_data(
     return raw_chunks_hf1, raw_chunks_hf2, phase_chunks, subject_ids, labels, channel_names, sfreq
 
 
-def load_cached_data(
+def get_cached_subject_info(
     data_dir: Path,
     cache_dir: str = "preprocessed_cache",
-    cache_key: str | None = None,
-    include_amplitude: bool = False,
-) -> tuple[np.ndarray, np.ndarray, np.ndarray, list[str], float]:
+) -> tuple[list[dict], int, int, float]:
     """
-    Load preprocessed data from cache (FAST - skips MNE preprocessing).
-
-    Uses the same cache created by the training data loader.
-    NOTE: This skips HF validation since cache only contains phase data.
-
-    Memory-efficient: Scans first to count chunks, then pre-allocates and fills.
-
-    Args:
-        data_dir: Root data directory
-        cache_dir: Cache subdirectory name
-        cache_key: Cache key from preprocessing config (auto-detected if None)
-        include_amplitude: Whether amplitude is included in cached data
+    Scan cache to get subject info without loading data.
 
     Returns:
-        phase_chunks: (n_total_segments, n_features, n_times) - phase data
-        subject_ids: (n_total_segments,) - subject index
-        labels: (n_total_segments,) - 0=HC, 1=MCI
-        channel_names: list of channel names (estimated)
-        sfreq: sampling frequency (estimated from chunk size)
+        subject_infos: List of {subject_idx, label, pt_files, n_chunks}
+        n_features: Number of features per chunk
+        n_times: Number of time samples per chunk
+        sfreq: Sampling frequency
     """
-    logger.info(f"Loading CACHED data from {data_dir / cache_dir}")
-    logger.info("  NOTE: Skipping HF artifact validation (cache has phase only)")
-
     cache_path = data_dir / cache_dir
 
     if not cache_path.exists():
         raise FileNotFoundError(
             f"Cache directory not found: {cache_path}\n"
-            "Run training first to create the cache, or use load_all_data() instead."
+            "Run training first to create the cache."
         )
 
-    # Phase 1: Scan to collect file info and count total chunks (no data loading)
-    logger.info("Phase 1: Scanning cache files...")
-    file_infos = []  # (pt_file, subject_idx, label)
-    chunk_counts = []
+    subject_infos = []
     sfreq = None
-    n_channels = None
     n_features = None
     n_times = None
 
@@ -374,7 +353,6 @@ def load_cached_data(
     for group_dir, group_path in [("HID", "HID/FILT"), ("MCI", "MCI/FILT")]:
         group_cache = cache_path / group_path
         if not group_cache.exists():
-            logger.warning(f"Cache group not found: {group_cache}")
             continue
 
         label = 0 if group_dir == "HID" else 1
@@ -387,97 +365,232 @@ def load_cached_data(
             if not pt_files:
                 continue
 
+            # Get shape from first file
             subject_n_chunks = 0
             for pt_file in pt_files:
                 try:
-                    # Quick metadata-only load
                     data = torch.load(pt_file, weights_only=True, map_location="cpu")
                     chunks_shape = data["chunks"].shape
-                    n_chunks = chunks_shape[0]
+                    subject_n_chunks += chunks_shape[0]
 
                     if n_features is None:
                         n_features = chunks_shape[1]
                         n_times = chunks_shape[2]
-
                     if sfreq is None and "info" in data:
-                        info = data["info"]
-                        sfreq = info.get("sfreq", 250.0)
-                        n_channels = info.get("n_channels", 256)
-
-                    file_infos.append((pt_file, subject_idx, label))
-                    chunk_counts.append(n_chunks)
-                    subject_n_chunks += n_chunks
-
-                    # Free memory immediately
+                        sfreq = data["info"].get("sfreq", 250.0)
                     del data
-
-                except Exception as e:
-                    logger.warning(f"Failed to scan {pt_file}: {e}")
+                except:
                     continue
 
             if subject_n_chunks > 0:
-                logger.info(f"  Subject {subject_idx} ({group_dir}): {subject_n_chunks} chunks")
+                subject_infos.append({
+                    "subject_idx": subject_idx,
+                    "label": label,
+                    "pt_files": pt_files,
+                    "n_chunks": subject_n_chunks,
+                })
                 subject_idx += 1
 
-    if not file_infos:
-        raise ValueError(f"No cached data found in {cache_path}!")
+    return subject_infos, n_features or 512, n_times or 1250, sfreq or 250.0
 
-    total_chunks = sum(chunk_counts)
 
-    # Calculate memory needed
-    mem_needed_gb = (total_chunks * n_features * n_times * 4) / (1024**3)
-    logger.info(f"Phase 2: Pre-allocating arrays for {total_chunks} chunks (~{mem_needed_gb:.1f} GB)")
-
-    # Phase 2: Pre-allocate arrays using memory-mapped file if large
-    if mem_needed_gb > 10:
-        # Use memory-mapped file to avoid OOM
-        import tempfile
-        logger.info("  Using memory-mapped file to avoid OOM...")
-        mmap_file = tempfile.NamedTemporaryFile(delete=False, suffix='.mmap')
-        phase_chunks = np.memmap(
-            mmap_file.name, dtype=np.float32, mode='w+',
-            shape=(total_chunks, n_features, n_times)
-        )
-    else:
-        phase_chunks = np.zeros((total_chunks, n_features, n_times), dtype=np.float32)
-
-    subject_ids = np.zeros(total_chunks, dtype=np.int32)
-    labels_arr = np.zeros(total_chunks, dtype=np.int32)
-
-    # Phase 3: Fill arrays in-place
-    logger.info("Phase 3: Loading data into pre-allocated arrays...")
-    current_idx = 0
-    for i, ((pt_file, subj_idx, label), n_chunks) in enumerate(zip(file_infos, chunk_counts)):
+def load_subject_data(subject_info: dict) -> np.ndarray:
+    """Load phase chunks for a single subject."""
+    chunks_list = []
+    for pt_file in subject_info["pt_files"]:
         try:
             data = torch.load(pt_file, weights_only=True, map_location="cpu")
-            chunks = data["chunks"].numpy()
+            chunks_list.append(data["chunks"].numpy())
+            del data
+        except:
+            continue
+    if chunks_list:
+        return np.concatenate(chunks_list, axis=0).astype(np.float32)
+    return np.array([])
 
-            end_idx = current_idx + n_chunks
-            phase_chunks[current_idx:end_idx] = chunks
-            subject_ids[current_idx:end_idx] = subj_idx
-            labels_arr[current_idx:end_idx] = label
-            current_idx = end_idx
+
+def load_cached_data_and_compute_latents(
+    data_dir: Path,
+    model: "ConvLSTMAutoencoder",
+    cache_dir: str = "preprocessed_cache",
+    include_amplitude: bool = False,
+    batch_size: int = 32,
+    device: str = "auto",
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, list[str], float]:
+    """
+    Load cached data AND compute latent trajectories in a streaming fashion.
+
+    Memory-efficient: Never loads all phase data at once. Instead:
+    1. Load one subject's phase data
+    2. Compute latent trajectories for that subject
+    3. Discard phase data, keep only latents
+    4. Repeat for all subjects
+
+    This reduces memory from ~25GB (phase) to ~2GB (latents).
+
+    Returns:
+        latent_trajectories: (n_total_segments, T', hidden_size) - latent dynamics
+        subject_ids: (n_total_segments,) - subject index
+        labels: (n_total_segments,) - 0=HC, 1=MCI
+        channel_names: list of channel names (estimated)
+        sfreq: sampling frequency
+    """
+    logger.info(f"Loading CACHED data from {data_dir / cache_dir}")
+    logger.info("  Memory-efficient mode: computing latents per-subject")
+
+    # Determine device
+    if device == "auto":
+        if torch.cuda.is_available():
+            device = torch.device("cuda")
+        elif torch.backends.mps.is_available():
+            device = torch.device("mps")
+        else:
+            device = torch.device("cpu")
+    else:
+        device = torch.device(device)
+
+    logger.info(f"  Using device: {device}")
+    model = model.to(device)
+
+    # Get subject info
+    subject_infos, n_features, n_times, sfreq = get_cached_subject_info(
+        data_dir, cache_dir
+    )
+
+    total_chunks = sum(s["n_chunks"] for s in subject_infos)
+    phase_mem_gb = (total_chunks * n_features * n_times * 4) / (1024**3)
+    logger.info(f"Total: {len(subject_infos)} subjects, {total_chunks} chunks")
+    logger.info(f"  Phase data would be ~{phase_mem_gb:.1f} GB (NOT loading all at once)")
+
+    # Compute latents per subject
+    model.eval()
+    all_latents = []
+    all_subject_ids = []
+    all_labels = []
+
+    with torch.no_grad():
+        for i, subj_info in enumerate(subject_infos):
+            # Load this subject's phase data
+            subj_chunks = load_subject_data(subj_info)
+            if len(subj_chunks) == 0:
+                continue
+
+            # Compute latents in batches
+            subj_latents = []
+            for j in range(0, len(subj_chunks), batch_size):
+                batch = torch.from_numpy(subj_chunks[j:j + batch_size]).float().to(device)
+                _, latents = model(batch)
+                subj_latents.append(latents.cpu().numpy())
+
+            subj_latents = np.concatenate(subj_latents, axis=0)
+
+            # Keep latents, discard phase data
+            all_latents.append(subj_latents)
+            all_subject_ids.extend([subj_info["subject_idx"]] * len(subj_latents))
+            all_labels.extend([subj_info["label"]] * len(subj_latents))
 
             # Free memory
-            del data, chunks
+            del subj_chunks, subj_latents
 
-            if (i + 1) % 100 == 0:
-                logger.info(f"  Loaded {i + 1}/{len(file_infos)} files...")
+            if (i + 1) % 20 == 0:
+                logger.info(f"  Processed {i + 1}/{len(subject_infos)} subjects...")
 
-        except Exception as e:
-            logger.warning(f"Failed to load {pt_file}: {e}")
-            current_idx += n_chunks
+    # Concatenate latents (much smaller than phase data)
+    logger.info("Concatenating latent trajectories...")
+    latent_trajectories = np.concatenate(all_latents, axis=0)
+    subject_ids = np.array(all_subject_ids, dtype=np.int32)
+    labels_arr = np.array(all_labels, dtype=np.int32)
 
-    # Estimate channel names if not available
-    if n_channels is None:
-        phase_channels = 3 if include_amplitude else 2
-        n_channels = n_features // phase_channels
+    latent_mem_gb = (latent_trajectories.nbytes) / (1024**3)
+    logger.info(f"Latent trajectories: {latent_trajectories.shape} (~{latent_mem_gb:.1f} GB)")
+
+    # Estimate channel names
+    phase_channels = 3 if include_amplitude else 2
+    n_channels = n_features // phase_channels
     channel_names = [f"E{i}" for i in range(n_channels)]
 
-    if sfreq is None:
-        sfreq = 250.0
+    logger.info(f"Loaded: {len(latent_trajectories)} segments from {len(subject_infos)} subjects")
+    logger.info(f"  HC: {(labels_arr == 0).sum()} segments, MCI: {(labels_arr == 1).sum()} segments")
 
-    logger.info(f"Loaded: {total_chunks} segments from {subject_idx} subjects")
+    return latent_trajectories, subject_ids, labels_arr, channel_names, sfreq
+
+
+def load_cached_data(
+    data_dir: Path,
+    cache_dir: str = "preprocessed_cache",
+    cache_key: str | None = None,
+    include_amplitude: bool = False,
+    max_subjects: int | None = None,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, list[str], float]:
+    """
+    Load preprocessed data from cache (FAST - skips MNE preprocessing).
+
+    WARNING: For large datasets, use load_cached_data_and_compute_latents() instead
+    to avoid OOM. This function loads ALL data into memory.
+
+    Args:
+        data_dir: Root data directory
+        cache_dir: Cache subdirectory name
+        cache_key: Cache key from preprocessing config (auto-detected if None)
+        include_amplitude: Whether amplitude is included in cached data
+        max_subjects: Limit number of subjects (for testing)
+
+    Returns:
+        phase_chunks: (n_total_segments, n_features, n_times) - phase data
+        subject_ids: (n_total_segments,) - subject index
+        labels: (n_total_segments,) - 0=HC, 1=MCI
+        channel_names: list of channel names (estimated)
+        sfreq: sampling frequency (estimated from chunk size)
+    """
+    logger.info(f"Loading CACHED data from {data_dir / cache_dir}")
+    logger.info("  NOTE: Skipping HF artifact validation (cache has phase only)")
+
+    # Get subject info without loading data
+    subject_infos, n_features, n_times, sfreq = get_cached_subject_info(
+        data_dir, cache_dir
+    )
+
+    if max_subjects:
+        subject_infos = subject_infos[:max_subjects]
+
+    total_chunks = sum(s["n_chunks"] for s in subject_infos)
+    mem_needed_gb = (total_chunks * n_features * n_times * 4) / (1024**3)
+    logger.info(f"Total: {len(subject_infos)} subjects, {total_chunks} chunks (~{mem_needed_gb:.1f} GB)")
+
+    if mem_needed_gb > 15:
+        logger.warning(f"WARNING: Loading {mem_needed_gb:.1f} GB into memory may cause OOM!")
+        logger.warning("Consider using load_cached_data_and_compute_latents() instead.")
+
+    # Load subjects one at a time, building lists
+    all_chunks = []
+    all_subject_ids = []
+    all_labels = []
+
+    for i, subj_info in enumerate(subject_infos):
+        subj_chunks = load_subject_data(subj_info)
+        if len(subj_chunks) > 0:
+            all_chunks.append(subj_chunks)
+            all_subject_ids.extend([subj_info["subject_idx"]] * len(subj_chunks))
+            all_labels.extend([subj_info["label"]] * len(subj_chunks))
+
+        if (i + 1) % 20 == 0:
+            logger.info(f"  Loaded {i + 1}/{len(subject_infos)} subjects...")
+
+    # Concatenate at the end
+    logger.info("Concatenating all subjects...")
+    phase_chunks = np.concatenate(all_chunks, axis=0)
+    subject_ids = np.array(all_subject_ids, dtype=np.int32)
+    labels_arr = np.array(all_labels, dtype=np.int32)
+
+    # Free the list
+    del all_chunks
+
+    # Estimate channel names
+    phase_channels = 3 if include_amplitude else 2
+    n_channels = n_features // phase_channels
+    channel_names = [f"E{i}" for i in range(n_channels)]
+
+    logger.info(f"Loaded: {len(phase_chunks)} segments from {len(subject_infos)} subjects")
     logger.info(f"  HC: {(labels_arr == 0).sum()} segments, MCI: {(labels_arr == 1).sum()} segments")
 
     return phase_chunks, subject_ids, labels_arr, channel_names, sfreq
@@ -1255,16 +1368,42 @@ def run_experiment(config: ExperimentConfig) -> pd.DataFrame:
     data_dir = Path(config.data_dir)
 
     if config.use_cache:
-        # FAST: Load from cache (skips HF validation)
-        phase_chunks, subject_ids, labels, channel_names, sfreq = load_cached_data(
+        # MEMORY-EFFICIENT: Stream through subjects, compute latents per-subject
+        # This avoids loading ~25GB of phase data into memory at once
+
+        # First, get subject info to determine n_channels
+        subject_infos, n_features, n_times, sfreq = get_cached_subject_info(
+            data_dir, config.cache_dir
+        )
+        n_channels = n_features // phase_channels
+
+        # Create model BEFORE loading data (needed for streaming latent computation)
+        model = ConvLSTMAutoencoder(
+            n_channels=n_channels,
+            hidden_size=hidden_size,
+            complexity=complexity,
+            phase_channels=phase_channels,
+        )
+        model.load_state_dict(state_dict)
+
+        # Stream through subjects, computing latents per-subject (~2GB instead of ~25GB)
+        latent_trajectories, subject_ids, labels, channel_names, sfreq = load_cached_data_and_compute_latents(
             data_dir,
+            model=model,
             cache_dir=config.cache_dir,
             include_amplitude=include_amplitude,
+            batch_size=32,
         )
+
         # Create dummy raw arrays (not used when skip_hf_validation=True)
-        raw_chunks_hf1 = np.zeros((len(phase_chunks), 1, 1), dtype=np.float32)
-        raw_chunks_hf2 = np.zeros((len(phase_chunks), 1, 1), dtype=np.float32)
-        logger.info("Using CACHED data - HF artifact validation will be skipped")
+        raw_chunks_hf1 = np.zeros((len(latent_trajectories), 1, 1), dtype=np.float32)
+        raw_chunks_hf2 = np.zeros((len(latent_trajectories), 1, 1), dtype=np.float32)
+
+        # phase_chunks not needed - latents already computed
+        phase_chunks = None  # Mark as unavailable
+
+        logger.info("Using CACHED data with STREAMING latent computation")
+        logger.info("  HF artifact validation will be skipped (no raw data)")
     else:
         # SLOW: Load from raw files with full preprocessing
         raw_chunks_hf1, raw_chunks_hf2, phase_chunks, subject_ids, labels, channel_names, sfreq = load_all_data(
@@ -1276,22 +1415,25 @@ def run_experiment(config: ExperimentConfig) -> pd.DataFrame:
             include_amplitude=include_amplitude,  # Match checkpoint config!
         )
 
-    # Create model with checkpoint's config
-    n_channels = phase_chunks.shape[1] // phase_channels
+        # Create model with checkpoint's config
+        n_channels = phase_chunks.shape[1] // phase_channels
 
-    model = ConvLSTMAutoencoder(
-        n_channels=n_channels,
-        hidden_size=hidden_size,
-        complexity=complexity,
-        phase_channels=phase_channels,
-    )
+        model = ConvLSTMAutoencoder(
+            n_channels=n_channels,
+            hidden_size=hidden_size,
+            complexity=complexity,
+            phase_channels=phase_channels,
+        )
+        model.load_state_dict(state_dict)
 
-    model.load_state_dict(state_dict)
     logger.info("=" * 60)
     logger.info("AE STATUS: TRAINED")
     logger.info(f"  Checkpoint: {config.checkpoint_path}")
     logger.info(f"  Phase channels: {phase_channels} ({'cos+sin+amplitude' if include_amplitude else 'cos+sin only'})")
-    logger.info(f"  Input shape: {phase_chunks.shape} (n_segments, n_features, n_samples)")
+    if phase_chunks is not None:
+        logger.info(f"  Input shape: {phase_chunks.shape} (n_segments, n_features, n_samples)")
+    else:
+        logger.info(f"  Latent shape: {latent_trajectories.shape} (streamed from cache)")
     logger.info("=" * 60)
 
     # Subject count warning (critic agent recommendation #6)
@@ -1310,10 +1452,11 @@ def run_experiment(config: ExperimentConfig) -> pd.DataFrame:
         logger.warning("  Treat results as SMOKE TEST ONLY, not evidence.")
         logger.warning("=" * 60)
 
-    # Compute latent TRAJECTORIES (not mean latents!)
-    logger.info("Computing latent trajectories (TRAINED model)...")
-    latent_trajectories = compute_latent_trajectories(model, phase_chunks)
-    logger.info(f"  Latent trajectory shape: {latent_trajectories.shape}")
+    # Compute latent TRAJECTORIES (not mean latents!) - SKIP if already computed from cache
+    if not config.use_cache:
+        logger.info("Computing latent trajectories (TRAINED model)...")
+        latent_trajectories = compute_latent_trajectories(model, phase_chunks)
+        logger.info(f"  Latent trajectory shape: {latent_trajectories.shape}")
 
     # Check for latent collapse (preflight check)
     latent_std = latent_trajectories.std()
@@ -1323,16 +1466,36 @@ def run_experiment(config: ExperimentConfig) -> pd.DataFrame:
     # Compute RANDOM model latents for comparison (critic agent recommendation #2)
     latent_trajectories_random = None
     if config.compare_random:
-        logger.info("Computing latent trajectories (RANDOM model for comparison)...")
-        model_random = ConvLSTMAutoencoder(
-            n_channels=n_channels,
-            hidden_size=hidden_size,  # Use same config as trained model
-            complexity=complexity,
-            phase_channels=phase_channels,
-        )
-        # Don't load any weights - use random initialization
-        latent_trajectories_random = compute_latent_trajectories(model_random, phase_chunks)
-        logger.info(f"  Random latent trajectory shape: {latent_trajectories_random.shape}")
+        if config.use_cache:
+            # When using cache, we need to stream through subjects again for random model
+            # This is slower but memory-safe
+            logger.info("Computing latent trajectories (RANDOM model for comparison, streaming)...")
+            model_random = ConvLSTMAutoencoder(
+                n_channels=n_channels,
+                hidden_size=hidden_size,
+                complexity=complexity,
+                phase_channels=phase_channels,
+            )
+            # Don't load any weights - use random initialization
+            latent_trajectories_random, _, _, _, _ = load_cached_data_and_compute_latents(
+                data_dir,
+                model=model_random,
+                cache_dir=config.cache_dir,
+                include_amplitude=include_amplitude,
+                batch_size=32,
+            )
+            logger.info(f"  Random latent trajectory shape: {latent_trajectories_random.shape}")
+        else:
+            logger.info("Computing latent trajectories (RANDOM model for comparison)...")
+            model_random = ConvLSTMAutoencoder(
+                n_channels=n_channels,
+                hidden_size=hidden_size,  # Use same config as trained model
+                complexity=complexity,
+                phase_channels=phase_channels,
+            )
+            # Don't load any weights - use random initialization
+            latent_trajectories_random = compute_latent_trajectories(model_random, phase_chunks)
+            logger.info(f"  Random latent trajectory shape: {latent_trajectories_random.shape}")
 
     # Cross-validation with stratification at subject level
     # CRITICAL FIX: Use StratifiedGroupKFold to balance HC/MCI per fold
