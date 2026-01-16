@@ -34,12 +34,8 @@ BATCH_SIZE=${BATCH_SIZE:-64}
 N_FOLDS=${N_FOLDS:-5}
 N_SEEDS=${N_SEEDS:-3}
 
-# Detect Python command
-if [ "${USE_SYSTEM_PYTHON:-false}" = true ]; then
-    PY="python"
-else
-    PY="uv run python"
-fi
+# Use python directly (RunPod has torch pre-installed)
+PY="python"
 
 # Parse arguments
 PARALLEL=false

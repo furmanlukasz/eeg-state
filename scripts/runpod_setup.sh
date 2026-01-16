@@ -97,8 +97,10 @@ if python -c "import torch; print(torch.cuda.is_available())" 2>/dev/null | grep
     pip install -e .
 
     # Set flag to use python directly instead of uv run
-    USE_SYSTEM_PYTHON=true
+    export USE_SYSTEM_PYTHON=true
     echo 'export USE_SYSTEM_PYTHON=true' >> ~/.bashrc
+    # Also add to current session
+    export PATH="$HOME/.local/bin:$PATH"
 else
     echo "Creating new virtual environment with uv..."
     uv sync --extra dev
@@ -179,21 +181,14 @@ fi
 # ---------------------------------------------
 echo -e "\n${YELLOW}[7/7] Creating convenience scripts${NC}"
 
-# Training script
+# Training script - use python directly since RunPod has torch pre-installed
 cat > "$REPO_DIR/run_train.sh" << 'TRAIN_EOF'
 #!/bin/bash
 # Train the autoencoder on full dataset
 cd /workspace/eeg-state
 
-# Use system python if available (RunPod), else uv
-if [ "${USE_SYSTEM_PYTHON:-false}" = true ]; then
-    PY="python"
-else
-    PY="uv run python"
-fi
-
 # Use runpod config for proper data path handling
-$PY -m eeg_biomarkers.training.train \
+python -m eeg_biomarkers.training.train \
     data=runpod \
     paths.data_dir=data \
     training.epochs=${EPOCHS:-300} \
@@ -209,14 +204,7 @@ cat > "$REPO_DIR/run_experiment.sh" << 'EXP_EOF'
 # Run integration experiment
 cd /workspace/eeg-state
 
-# Use system python if available (RunPod), else uv
-if [ "${USE_SYSTEM_PYTHON:-false}" = true ]; then
-    PY="python"
-else
-    PY="uv run python"
-fi
-
-$PY -m eeg_biomarkers.experiments.integration_experiment \
+python -m eeg_biomarkers.experiments.integration_experiment \
     --data-dir data \
     --output-dir results/integration \
     --checkpoint ${CHECKPOINT:-models/best.pt} \
@@ -231,13 +219,7 @@ cat > "$REPO_DIR/run_tests.sh" << 'TEST_EOF'
 #!/bin/bash
 # Run tests
 cd /workspace/eeg-state
-
-# Use system python if available (RunPod), else uv
-if [ "${USE_SYSTEM_PYTHON:-false}" = true ]; then
-    pytest tests/ -v --tb=short "$@"
-else
-    uv run pytest tests/ -v --tb=short "$@"
-fi
+pytest tests/ -v --tb=short "$@"
 TEST_EOF
 chmod +x "$REPO_DIR/run_tests.sh"
 
