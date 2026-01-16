@@ -24,6 +24,12 @@ from eeg_biomarkers.data.preprocessing import (
 logger = logging.getLogger(__name__)
 
 
+def _init_worker():
+    """Initialize worker process - suppress MNE verbose output."""
+    import mne
+    mne.set_log_level("ERROR")
+
+
 def _load_single_file(args: tuple, preprocess_cfg: dict, model_cfg: dict) -> dict | None:
     """
     Load and preprocess a single EEG file. Used for parallel processing.
@@ -36,6 +42,9 @@ def _load_single_file(args: tuple, preprocess_cfg: dict, model_cfg: dict) -> dic
     Returns:
         Dict with chunks, mask, subject_id, group_idx or None if failed
     """
+    import mne
+    mne.set_log_level("ERROR")  # Suppress MNE output in worker
+
     fif_file, subject_id, group_idx, group_name = args
     fif_file = Path(fif_file)  # Convert back from string
 
@@ -210,22 +219,36 @@ class EEGDataModule:
             (str(f), sid, gidx, gname) for f, sid, gidx, gname in files_to_process
         ]
 
-        # Determine number of workers (use all CPUs, but cap at 16 to avoid memory issues)
-        n_workers = min(os.cpu_count() or 4, 16)
+        # Determine number of workers (use all CPUs, but cap at 8 to avoid memory issues)
+        # Lower cap because each worker loads full EEG files into memory
+        n_workers = min(os.cpu_count() or 4, 8)
         logger.info(f"Loading data with {n_workers} parallel workers")
 
-        # Load files in parallel
+        # Load files in parallel using spawn context (safer with MNE)
         n_failed = 0
         load_func = partial(_load_single_file, preprocess_cfg=preprocess_cfg, model_cfg=model_cfg)
 
-        with ProcessPoolExecutor(max_workers=n_workers) as executor:
+        import multiprocessing as mp
+        ctx = mp.get_context("spawn")
+
+        with ProcessPoolExecutor(
+            max_workers=n_workers,
+            mp_context=ctx,
+            initializer=_init_worker,
+        ) as executor:
             # Submit all jobs
             futures = {executor.submit(load_func, args): args for args in files_to_process_str}
 
             # Process results as they complete with progress bar
             with tqdm(total=len(futures), desc="Loading EEG data", unit="file") as pbar:
                 for future in as_completed(futures):
-                    result = future.result()
+                    try:
+                        result = future.result(timeout=120)  # 2 min timeout per file
+                    except Exception as e:
+                        n_failed += 1
+                        if n_failed <= 5:
+                            logger.warning(f"Worker failed: {e}")
+                        result = None
 
                     if result is None:
                         n_failed += 1
