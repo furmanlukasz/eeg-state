@@ -45,7 +45,7 @@ outputs/
 multirun/
 
 # Data (too large for git)
-data/
+/data/
 *.fif
 *.fif.gz
 

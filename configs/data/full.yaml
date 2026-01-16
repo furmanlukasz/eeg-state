@@ -1,0 +1,31 @@
+# Full dataset configuration (all subjects)
+_target_: eeg_biomarkers.data.dataset.EEGDataModule
+
+groups:
+  - name: "MCI"
+    path: "MCI"
+  - name: "HC"
+    path: "HID"
+
+preprocessing:
+  filter_low: 3.0
+  filter_high: 48.0
+  notch_freq: null
+  reference: "csd"
+  chunk_duration: 5.0
+  chunk_overlap: 0.0
+  phase_method: "hilbert"
+
+sampling:
+  n_subjects_per_group: null  # All subjects
+  random_seed: 42
+
+splitting:
+  method: "group_kfold"
+  n_splits: 5
+  test_size: 0.2
+  group_by: "subject"
+
+caching:
+  enabled: true
+  cache_dir: "preprocessed_data"

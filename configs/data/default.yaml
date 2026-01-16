@@ -1,0 +1,45 @@
+# Data configuration
+# EEG preprocessing and loading settings
+
+# Data paths (relative to paths.data_dir)
+groups:
+  - name: "MCI"
+    path: "MCI"
+  - name: "HC"
+    path: "HID"  # Healthy controls folder name in legacy data
+  # - name: "AD"  # Uncomment if using AD data
+  #   path: "AD"
+
+# Preprocessing
+preprocessing:
+  # Filtering
+  filter_low: 3.0  # Hz
+  filter_high: 48.0  # Hz
+  notch_freq: null  # Set to 50 or 60 for line noise removal
+
+  # Referencing
+  reference: "csd"  # "csd" (current source density) or "average"
+
+  # Chunking
+  chunk_duration: 5.0  # seconds
+  chunk_overlap: 0.0  # seconds (0 = no overlap)
+
+  # Phase extraction
+  phase_method: "hilbert"  # Only hilbert supported currently
+
+# Sampling
+sampling:
+  n_subjects_per_group: null  # null = use all subjects
+  random_seed: 42
+
+# Splitting
+splitting:
+  method: "group_kfold"  # "group_kfold" or "stratified_kfold"
+  n_splits: 5
+  test_size: 0.2  # For single train/test split
+  group_by: "subject"  # Prevents segment-level leakage
+
+# Caching
+caching:
+  enabled: true
+  cache_dir: "preprocessed_data"
