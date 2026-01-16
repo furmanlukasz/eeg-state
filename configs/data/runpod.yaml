@@ -1,12 +1,12 @@
 # RunPod configuration (full dataset with RunPod paths)
-# Data expected at /workspace/data/{MCI,HID}
+# Data expected at /workspace/data/{MCI,HID}/FILT/{subject}/
 _target_: eeg_biomarkers.data.dataset.EEGDataModule
 
 groups:
   - name: "MCI"
-    path: "MCI"
+    path: "MCI/FILT"
   - name: "HC"
-    path: "HID"
+    path: "HID/FILT"
 
 preprocessing:
   filter_low: 3.0
