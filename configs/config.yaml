@@ -1,0 +1,37 @@
+# Main Hydra configuration
+# Override with: python -m eeg_biomarkers.training.train model=complex data=full
+
+defaults:
+  - model: base
+  - data: default
+  - training: default
+  - _self_
+
+# Experiment settings
+experiment:
+  name: "eeg_mci_biomarkers"
+  seed: 42
+  device: "auto"  # auto, cuda, mps, cpu
+
+# Paths (relative to hydra working directory)
+paths:
+  data_dir: "data"
+  output_dir: "outputs"
+  model_dir: "models"
+  results_dir: "results"
+
+# Logging
+logging:
+  level: "INFO"
+  wandb:
+    enabled: true
+    project: "eeg-mci-biomarkers"
+    entity: null  # Your W&B username/team
+
+# Hydra configuration
+hydra:
+  run:
+    dir: outputs/${experiment.name}/${now:%Y-%m-%d_%H-%M-%S}
+  sweep:
+    dir: outputs/${experiment.name}/multirun/${now:%Y-%m-%d_%H-%M-%S}
+    subdir: ${hydra.job.num}

@@ -1,0 +1,27 @@
+# Base model configuration
+name: "convlstm_autoencoder"
+
+encoder:
+  complexity: 2  # 0-3, controls network depth
+  hidden_size: 64
+  num_lstm_layers: 1
+  dropout: 0.1
+
+decoder:
+  # Mirrors encoder by default
+  use_encoder_config: true
+  constrain_output: true  # Apply tanh to cos/sin outputs to keep in [-1, 1]
+
+# Recurrence matrix settings
+recurrence:
+  # Use RR-controlled thresholding (recommended)
+  threshold_method: "rr_controlled"  # "rr_controlled" or "fixed"
+  target_rr: 0.02  # Target recurrence rate (2%)
+  fixed_epsilon: null  # Only used if threshold_method is "fixed"
+
+# Phase representation (CRITICAL: use circular)
+phase:
+  representation: "circular"  # "circular" (cos, sin) or "raw" (legacy, not recommended)
+  include_amplitude: false  # Whether to include log-amplitude as additional channel
+  normalize_amplitude: true  # Z-score normalize log-amplitude per channel (recommended)
+                             # This prevents amplitude from dominating the reconstruction loss

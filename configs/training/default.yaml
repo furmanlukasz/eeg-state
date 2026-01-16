@@ -1,0 +1,67 @@
+# Training configuration
+# Optimizer, scheduler, and training loop settings
+
+# Training loop
+epochs: 100
+batch_size: 64
+gradient_accumulation_steps: 1
+
+# Gradient clipping (CRITICAL for training stability)
+gradient_clip_norm: 1.0  # Max gradient norm; set to null to disable
+
+# Early stopping
+early_stopping:
+  enabled: true
+  patience: 20
+  min_delta: 0.001
+  monitor: "val_loss"
+
+# Checkpointing
+checkpointing:
+  enabled: true
+  save_every_n_epochs: 10
+  save_best: true
+  save_last: true
+
+# Optimizer
+optimizer:
+  name: "adamw"
+  lr: 0.001
+  weight_decay: 0.01
+  betas: [0.9, 0.999]
+
+# Learning rate scheduler
+scheduler:
+  name: "cosine"  # "cosine", "step", "plateau", or null
+  warmup_epochs: 5
+  min_lr: 0.00001
+  # For step scheduler
+  step_size: 30
+  gamma: 0.1
+  # For plateau scheduler
+  factor: 0.5
+  patience: 10
+
+# Loss function
+loss:
+  name: "mse"  # MSE for reconstruction
+  # For phase loss, computed on (cos, sin) components
+
+# Loss component weighting
+# These control the relative importance of different loss terms
+lambda_phase: 1.0        # Weight for cos/sin reconstruction loss
+lambda_amplitude: 1.0    # Weight for amplitude reconstruction loss (if include_amplitude=True)
+lambda_unit_circle: 0.1  # Unit-circle regularization: penalize (cos² + sin² - 1)²
+                         # This prevents the model from "cheating" by shrinking cos/sin magnitudes
+                         # Set to 0 to disable
+
+# Regularization
+regularization:
+  label_smoothing: 0.0
+  mixup_alpha: 0.0  # Not typically used for autoencoders
+
+# Validation
+validation:
+  enabled: true
+  frequency: 1  # Validate every N epochs
+  subset_fraction: null  # Use full validation set

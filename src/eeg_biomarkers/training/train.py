@@ -1,0 +1,127 @@
+"""Main training entry point with Hydra configuration."""
+
+from __future__ import annotations
+
+import logging
+from pathlib import Path
+
+import hydra
+from omegaconf import DictConfig, OmegaConf
+import torch
+
+try:
+    import wandb
+    WANDB_AVAILABLE = True
+except ImportError:
+    WANDB_AVAILABLE = False
+
+from eeg_biomarkers.models import ConvLSTMAutoencoder
+from eeg_biomarkers.data import EEGDataModule
+from eeg_biomarkers.training.trainer import Trainer
+
+logger = logging.getLogger(__name__)
+
+
+def setup_logging(cfg: DictConfig) -> None:
+    """Configure logging based on config."""
+    logging.basicConfig(
+        level=getattr(logging, cfg.logging.level),
+        format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    )
+
+
+def setup_wandb(cfg: DictConfig) -> None:
+    """Initialize Weights & Biases."""
+    if not cfg.logging.wandb.enabled or not WANDB_AVAILABLE:
+        return
+
+    wandb.init(
+        project=cfg.logging.wandb.project,
+        entity=cfg.logging.wandb.entity,
+        name=cfg.experiment.name,
+        config=OmegaConf.to_container(cfg, resolve=True),
+    )
+
+
+def set_seed(seed: int) -> None:
+    """Set random seeds for reproducibility."""
+    import random
+    import numpy as np
+
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(seed)
+
+
+@hydra.main(version_base=None, config_path="../../../configs", config_name="config")
+def main(cfg: DictConfig) -> None:
+    """
+    Main training function.
+
+    Usage:
+        # Default training
+        python -m eeg_biomarkers.training.train
+
+        # Override config
+        python -m eeg_biomarkers.training.train model=complex training.epochs=200
+
+        # Multi-run sweep
+        python -m eeg_biomarkers.training.train --multirun model=base,complex
+    """
+    # Setup
+    setup_logging(cfg)
+    set_seed(cfg.experiment.seed)
+    setup_wandb(cfg)
+
+    logger.info("Configuration:")
+    logger.info(OmegaConf.to_yaml(cfg))
+
+    # Resolve paths
+    data_dir = Path(cfg.paths.data_dir)
+    output_dir = Path(cfg.paths.output_dir)
+    model_dir = Path(cfg.paths.model_dir)
+    model_dir.mkdir(parents=True, exist_ok=True)
+
+    # Load data
+    logger.info("Loading data...")
+    data_module = EEGDataModule(cfg, data_dir)
+    data_module.setup("fit")
+
+    train_loader = data_module.train_dataloader()
+    val_loader = data_module.val_dataloader()
+
+    # Create model
+    logger.info("Creating model...")
+    n_channels = data_module.n_channels
+    model = ConvLSTMAutoencoder.from_config(cfg.model, n_channels)
+    logger.info(f"Model: {model}")
+
+    # Count parameters
+    n_params = sum(p.numel() for p in model.parameters())
+    n_trainable = sum(p.numel() for p in model.parameters() if p.requires_grad)
+    logger.info(f"Parameters: {n_params:,} total, {n_trainable:,} trainable")
+
+    # Create trainer
+    trainer = Trainer(model, cfg, device=cfg.experiment.device)
+
+    # Train
+    logger.info("Starting training...")
+    history = trainer.fit(
+        train_loader,
+        val_loader,
+        checkpoint_dir=model_dir,
+    )
+
+    # Log final metrics
+    logger.info(f"Training complete. Best val loss: {trainer.best_val_loss:.4f}")
+
+    if WANDB_AVAILABLE and cfg.logging.wandb.enabled:
+        wandb.finish()
+
+    return trainer.best_val_loss
+
+
+if __name__ == "__main__":
+    main()

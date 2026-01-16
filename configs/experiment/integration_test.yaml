@@ -1,0 +1,72 @@
+# Integration Experiment Configuration
+# Tests if state-conditioning improves biomarker reliability
+
+# @package _global_
+defaults:
+  - override /model: base
+  - override /data: full
+  - override /training: default
+
+experiment:
+  name: "integration_experiment"
+  description: "Validate state-conditioning improves subject-level generalization"
+
+# State discovery settings
+state_discovery:
+  # UMAP for dimensionality reduction
+  umap:
+    n_neighbors: 15
+    min_dist: 0.1
+    metric: "cosine"
+    n_components: 3
+
+  # DBSCAN for clustering
+  clustering:
+    method: "hdbscan"  # "dbscan" or "hdbscan"
+    min_cluster_size: 10
+    min_samples: 5
+
+  # State selection criteria
+  selection:
+    min_dwell_time: 0.5  # seconds
+    stability_threshold: 0.8
+    exclude_transitions: true
+
+# RQA feature computation
+rqa:
+  embedding_dim: 3
+  time_delay: 1
+  # Threshold sensitivity analysis
+  target_rr_values: [0.01, 0.02, 0.05]
+  # Features to compute
+  features:
+    - "RR"
+    - "DET"
+    - "L"
+    - "Lmax"
+    - "ENTR"
+    - "LAM"
+    - "TT"
+    - "Vmax"
+
+# Classification settings
+classification:
+  model: "xgboost"
+  cv_folds: 5
+  # Evaluate at subject level, not segment level
+  evaluation_level: "subject"
+
+# Comparison
+comparison:
+  # Baseline: whole-recording features
+  # State-conditioned: within-state features
+  metrics:
+    - "auc"
+    - "accuracy"
+    - "cohens_d"
+    - "cv_variance"
+
+# Success criteria
+success_criteria:
+  min_auc_improvement: 0.05
+  max_cv_variance_ratio: 0.8  # State-conditioned should have lower variance
