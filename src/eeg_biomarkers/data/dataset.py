@@ -5,10 +5,11 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Literal
 import logging
+import hashlib
 
 import numpy as np
 import torch
-from torch.utils.data import Dataset, DataLoader
+from torch.utils.data import Dataset, DataLoader, ConcatDataset
 from sklearn.model_selection import train_test_split
 from omegaconf import DictConfig
 from tqdm import tqdm
@@ -21,131 +22,46 @@ from eeg_biomarkers.data.preprocessing import (
 logger = logging.getLogger(__name__)
 
 
-class EEGChunkDataset(Dataset):
+def get_cache_key(cfg: DictConfig) -> str:
+    """Generate a unique cache key based on preprocessing config."""
+    key_parts = [
+        f"filter_{cfg.data.preprocessing.filter_low}_{cfg.data.preprocessing.filter_high}",
+        f"ref_{cfg.data.preprocessing.reference}",
+        f"notch_{cfg.data.preprocessing.notch_freq}",
+        f"chunk_{cfg.data.preprocessing.chunk_duration}_{cfg.data.preprocessing.chunk_overlap}",
+        f"amp_{cfg.model.phase.include_amplitude}",
+    ]
+    key_str = "_".join(key_parts)
+    return hashlib.md5(key_str.encode()).hexdigest()[:8]
+
+
+class CachedFileDataset(Dataset):
     """
-    Lazy-loading PyTorch Dataset for EEG phase chunks.
+    Dataset that loads preprocessed chunks from a single cached .pt file.
 
-    Loads and preprocesses files on-demand rather than pre-loading everything.
-    Caches processed chunks in memory as they are accessed.
-
-    Args:
-        file_infos: List of (file_path, subject_id, label) tuples
-        cfg: Hydra configuration for preprocessing
+    Each file is preprocessed once and saved as a tensor file.
+    Loading tensors is extremely fast compared to MNE preprocessing.
     """
 
-    def __init__(
-        self,
-        file_infos: list[tuple[Path, str, int]],
-        cfg: DictConfig,
-    ):
-        self.file_infos = file_infos
-        self.cfg = cfg
+    def __init__(self, cache_path: Path, label: int, subject_id: str):
+        self.cache_path = cache_path
+        self.label = label
+        self.subject_id = subject_id
 
-        # Build index: map global chunk index -> (file_idx, local_chunk_idx)
-        # We need to know how many chunks each file produces
-        self._file_chunks: list[np.ndarray] = [None] * len(file_infos)  # Lazy cache
-        self._file_masks: list[np.ndarray] = [None] * len(file_infos)
-        self._chunk_counts: list[int] = []
-        self._cumsum: list[int] = [0]
-
-        # Pre-scan files to get chunk counts (fast - just reads headers)
-        logger.info(f"Scanning {len(file_infos)} files for chunk counts...")
-        for fif_file, _, _ in tqdm(file_infos, desc="Scanning files", unit="file"):
-            try:
-                # Quick scan: load raw just to get duration
-                import mne
-                raw = mne.io.read_raw_fif(fif_file, preload=False, verbose=False)
-                n_samples = raw.n_times
-                sfreq = raw.info["sfreq"]
-                raw.close()
-
-                # Calculate chunks
-                chunk_samples = int(cfg.data.preprocessing.chunk_duration * sfreq)
-                overlap_samples = int(cfg.data.preprocessing.chunk_overlap * sfreq)
-                step = chunk_samples - overlap_samples
-                n_chunks = int(np.ceil((n_samples - overlap_samples) / step))
-
-                self._chunk_counts.append(n_chunks)
-                self._cumsum.append(self._cumsum[-1] + n_chunks)
-            except Exception as e:
-                logger.warning(f"Failed to scan {fif_file.name}: {e}")
-                self._chunk_counts.append(0)
-                self._cumsum.append(self._cumsum[-1])
-
-        self._total_chunks = self._cumsum[-1]
-        logger.info(f"Total chunks: {self._total_chunks} from {len(file_infos)} files")
+        # Load cached data (fast - just tensor loading)
+        data = torch.load(cache_path, weights_only=True)
+        self.chunks = data["chunks"]  # (n_chunks, features, time)
+        self.masks = data["masks"]    # (n_chunks, time)
 
     def __len__(self) -> int:
-        return self._total_chunks
-
-    def _load_file(self, file_idx: int) -> None:
-        """Load and preprocess a single file, caching the results."""
-        if self._file_chunks[file_idx] is not None:
-            return  # Already loaded
-
-        fif_file, subject_id, label = self.file_infos[file_idx]
-
-        try:
-            raw = load_eeg_file(
-                fif_file,
-                filter_low=self.cfg.data.preprocessing.filter_low,
-                filter_high=self.cfg.data.preprocessing.filter_high,
-                reference=self.cfg.data.preprocessing.reference,
-                notch_freq=self.cfg.data.preprocessing.notch_freq,
-            )
-
-            chunks, mask, _ = prepare_phase_chunks(
-                raw,
-                chunk_duration=self.cfg.data.preprocessing.chunk_duration,
-                chunk_overlap=self.cfg.data.preprocessing.chunk_overlap,
-                include_amplitude=self.cfg.model.phase.include_amplitude,
-            )
-
-            self._file_chunks[file_idx] = chunks.astype(np.float32)
-            self._file_masks[file_idx] = mask
-            del raw
-
-        except Exception as e:
-            logger.error(f"Failed to load {fif_file.name}: {e}")
-            # Create empty placeholder
-            self._file_chunks[file_idx] = np.zeros((0, 1, 1), dtype=np.float32)
-            self._file_masks[file_idx] = np.zeros((0, 1), dtype=bool)
-
-    def _global_to_local(self, global_idx: int) -> tuple[int, int]:
-        """Convert global chunk index to (file_idx, local_chunk_idx)."""
-        # Binary search for the file
-        file_idx = np.searchsorted(self._cumsum[1:], global_idx, side='right')
-        local_idx = global_idx - self._cumsum[file_idx]
-        return file_idx, local_idx
+        return len(self.chunks)
 
     def __getitem__(self, idx: int) -> dict:
-        file_idx, local_idx = self._global_to_local(idx)
-
-        # Lazy load if needed
-        self._load_file(file_idx)
-
-        _, subject_id, label = self.file_infos[file_idx]
-
-        chunks = self._file_chunks[file_idx]
-        masks = self._file_masks[file_idx]
-
-        # Handle edge case where file failed to load properly
-        if local_idx >= len(chunks):
-            # Return zeros - shouldn't happen often
-            chunk_samples = int(self.cfg.data.preprocessing.chunk_duration * 250)  # Assume 250Hz
-            n_features = 256 * (3 if self.cfg.model.phase.include_amplitude else 2)
-            return {
-                "data": torch.zeros(n_features, chunk_samples),
-                "mask": torch.zeros(chunk_samples, dtype=torch.bool),
-                "label": torch.tensor(label, dtype=torch.long),
-                "subject_id": subject_id,
-            }
-
         return {
-            "data": torch.from_numpy(chunks[local_idx]).float(),
-            "mask": torch.from_numpy(masks[local_idx]).bool(),
-            "label": torch.tensor(label, dtype=torch.long),
-            "subject_id": subject_id,
+            "data": self.chunks[idx],
+            "mask": self.masks[idx],
+            "label": torch.tensor(self.label, dtype=torch.long),
+            "subject_id": self.subject_id,
         }
 
 
@@ -195,9 +111,12 @@ class EEGDataModule:
 
     Handles:
     - Loading data from multiple groups/conditions
-    - Preprocessing and phase extraction
+    - Preprocessing and phase extraction with disk caching
     - Train/test splitting with proper subject-level separation
     - DataLoader creation
+
+    The preprocessing cache ensures that expensive CSD/filtering operations
+    are only done once per file. Subsequent runs load fast tensor files.
 
     Args:
         cfg: Hydra configuration
@@ -208,9 +127,14 @@ class EEGDataModule:
         self.cfg = cfg
         self.data_dir = Path(data_dir)
 
-        self.train_dataset: EEGChunkDataset | None = None
-        self.val_dataset: EEGChunkDataset | None = None
-        self.test_dataset: EEGChunkDataset | None = None
+        # Cache directory for preprocessed data
+        cache_dir = cfg.data.get("caching", {}).get("cache_dir", "preprocessed_cache")
+        self.cache_dir = self.data_dir / cache_dir
+        self.cache_key = get_cache_key(cfg)
+
+        self.train_dataset: Dataset | None = None
+        self.val_dataset: Dataset | None = None
+        self.test_dataset: Dataset | None = None
 
         self._label_map: dict[str, int] = {}
         self._n_channels: int | None = None
@@ -223,25 +147,70 @@ class EEGDataModule:
             stage: One of "fit", "test", or "predict"
         """
         if stage == "fit":
-            self._setup_lazy_datasets()
+            self._setup_cached_datasets()
         elif stage == "test":
             if self.test_dataset is None:
-                self._setup_lazy_datasets()
+                self._setup_cached_datasets()
         elif stage == "predict":
-            self._setup_lazy_datasets()
+            self._setup_cached_datasets()
 
-    def _setup_lazy_datasets(self) -> None:
+    def _preprocess_and_cache_file(
+        self,
+        fif_file: Path,
+        cache_path: Path
+    ) -> bool:
         """
-        Set up lazy-loading datasets.
+        Preprocess a single file and save to cache.
 
-        Memory-efficient approach:
-        1. Discover all subjects and their files (no data loading)
+        Returns True if successful, False otherwise.
+        """
+        try:
+            raw = load_eeg_file(
+                fif_file,
+                filter_low=self.cfg.data.preprocessing.filter_low,
+                filter_high=self.cfg.data.preprocessing.filter_high,
+                reference=self.cfg.data.preprocessing.reference,
+                notch_freq=self.cfg.data.preprocessing.notch_freq,
+            )
+
+            chunks, mask, info = prepare_phase_chunks(
+                raw,
+                chunk_duration=self.cfg.data.preprocessing.chunk_duration,
+                chunk_overlap=self.cfg.data.preprocessing.chunk_overlap,
+                include_amplitude=self.cfg.model.phase.include_amplitude,
+            )
+
+            # Store n_channels for later
+            if self._n_channels is None:
+                self._n_channels = info["n_channels"]
+
+            # Save as tensors (fast to load)
+            cache_path.parent.mkdir(parents=True, exist_ok=True)
+            torch.save({
+                "chunks": torch.from_numpy(chunks.astype(np.float32)),
+                "masks": torch.from_numpy(mask),
+                "info": info,
+            }, cache_path)
+
+            del raw
+            return True
+
+        except Exception as e:
+            logger.warning(f"Failed to preprocess {fif_file.name}: {e}")
+            return False
+
+    def _setup_cached_datasets(self) -> None:
+        """
+        Set up datasets with disk caching.
+
+        Strategy:
+        1. Discover all subjects and their files
         2. Split subjects into train/val/test
-        3. Create lazy-loading datasets for each split
+        3. For each split, preprocess files (if not cached) and create dataset
         """
-        # Step 1: Discover all subjects and their files (without loading data)
-        subject_files: dict[str, list[Path]] = {}  # subject_id -> list of files
-        subject_labels: dict[str, int] = {}  # subject_id -> group_idx
+        # Step 1: Discover all subjects and their files
+        subject_files: dict[str, list[Path]] = {}
+        subject_labels: dict[str, int] = {}
 
         for group_idx, group in enumerate(self.cfg.data.groups):
             group_name = group.name
@@ -252,10 +221,9 @@ class EEGDataModule:
                 logger.warning(f"Group path does not exist: {group_path}")
                 continue
 
-            # Get subject directories
             subject_dirs = sorted([d for d in group_path.iterdir() if d.is_dir()])
 
-            # Randomize subject sampling to avoid systematic bias
+            # Sampling
             n_subjects = self.cfg.data.sampling.n_subjects_per_group
             if n_subjects is not None and n_subjects < len(subject_dirs):
                 rng = np.random.RandomState(self.cfg.data.sampling.random_seed)
@@ -266,7 +234,6 @@ class EEGDataModule:
 
             for subject_dir in subject_dirs:
                 subject_id = subject_dir.name
-                # Filter out macOS metadata files (._*)
                 fif_files = [
                     f for f in subject_dir.rglob("*_eeg.fif")
                     if not f.name.startswith("._")
@@ -279,7 +246,7 @@ class EEGDataModule:
         total_files = sum(len(files) for files in subject_files.values())
         logger.info(f"Found {len(all_subjects)} subjects with {total_files} EEG files")
 
-        # Step 2: Split subjects BEFORE creating datasets
+        # Step 2: Split subjects
         stratify = [subject_labels[s] for s in all_subjects]
 
         train_subjects, test_subjects = train_test_split(
@@ -302,40 +269,69 @@ class EEGDataModule:
             f"{len(test_subjects)} test subjects"
         )
 
-        # Step 3: Create file info lists for each split
-        def get_file_infos(subjects: list[str]) -> list[tuple[Path, str, int]]:
-            """Get (file_path, subject_id, label) tuples for subjects."""
-            infos = []
+        # Step 3: Preprocess and cache files, then create datasets
+        def get_cache_path(fif_file: Path) -> Path:
+            """Get cache path for a .fif file."""
+            # Use relative path from data_dir to create unique cache path
+            rel_path = fif_file.relative_to(self.data_dir)
+            cache_name = f"{rel_path.stem}_{self.cache_key}.pt"
+            return self.cache_dir / rel_path.parent / cache_name
+
+        def build_dataset(subjects: list[str], desc: str) -> Dataset:
+            """Build dataset for a set of subjects, using cache."""
+            datasets = []
+            n_cached = 0
+            n_processed = 0
+            n_failed = 0
+
+            # Collect all files for these subjects
+            all_files = []
             for subj in subjects:
                 for fif_file in subject_files[subj]:
-                    infos.append((fif_file, subj, subject_labels[subj]))
-            return infos
+                    all_files.append((fif_file, subj, subject_labels[subj]))
 
-        train_infos = get_file_infos(train_subjects)
-        val_infos = get_file_infos(val_subjects)
-        test_infos = get_file_infos(test_subjects)
+            with tqdm(all_files, desc=f"Preparing {desc}", unit="file") as pbar:
+                for fif_file, subject_id, label in pbar:
+                    cache_path = get_cache_path(fif_file)
+                    pbar.set_postfix(subj=subject_id[:10])
+
+                    # Check if cached
+                    if cache_path.exists():
+                        n_cached += 1
+                    else:
+                        # Preprocess and cache
+                        if self._preprocess_and_cache_file(fif_file, cache_path):
+                            n_processed += 1
+                        else:
+                            n_failed += 1
+                            continue
+
+                    # Create dataset from cached file
+                    try:
+                        ds = CachedFileDataset(cache_path, label, subject_id)
+                        datasets.append(ds)
+                    except Exception as e:
+                        logger.warning(f"Failed to load cache {cache_path}: {e}")
+                        n_failed += 1
+
+            logger.info(
+                f"{desc}: {n_cached} cached, {n_processed} processed, "
+                f"{n_failed} failed, {sum(len(d) for d in datasets)} total chunks"
+            )
+
+            if not datasets:
+                raise RuntimeError(f"No data loaded for {desc}!")
+
+            return ConcatDataset(datasets)
+
+        self.train_dataset = build_dataset(train_subjects, "train")
+        self.val_dataset = build_dataset(val_subjects, "val")
+        self.test_dataset = build_dataset(test_subjects, "test")
 
         logger.info(
-            f"Files per split: {len(train_infos)} train, {len(val_infos)} val, "
-            f"{len(test_infos)} test"
+            f"Total: {len(self.train_dataset)} train, "
+            f"{len(self.val_dataset)} val, {len(self.test_dataset)} test chunks"
         )
-
-        # Step 4: Create lazy-loading datasets
-        self.train_dataset = EEGChunkDataset(train_infos, self.cfg)
-        self.val_dataset = EEGChunkDataset(val_infos, self.cfg)
-        self.test_dataset = EEGChunkDataset(test_infos, self.cfg)
-
-        logger.info(
-            f"Total chunks: {len(self.train_dataset)} train, "
-            f"{len(self.val_dataset)} val, {len(self.test_dataset)} test"
-        )
-
-        # Get n_channels from first file
-        if train_infos:
-            import mne
-            raw = mne.io.read_raw_fif(train_infos[0][0], preload=False, verbose=False)
-            self._n_channels = len(raw.ch_names)
-            raw.close()
 
     def train_dataloader(self, batch_size: int | None = None) -> DataLoader:
         """Get training DataLoader."""
@@ -347,8 +343,9 @@ class EEGDataModule:
             self.train_dataset,
             batch_size=bs,
             shuffle=True,
-            num_workers=0,  # Must be 0 for lazy loading with caching
+            num_workers=4,  # Can use workers now - loading cached tensors is fast
             pin_memory=True,
+            persistent_workers=True,
         )
 
     def val_dataloader(self, batch_size: int | None = None) -> DataLoader:
@@ -361,8 +358,9 @@ class EEGDataModule:
             self.val_dataset,
             batch_size=bs,
             shuffle=False,
-            num_workers=0,  # Must be 0 for lazy loading with caching
+            num_workers=4,
             pin_memory=True,
+            persistent_workers=True,
         )
 
     def test_dataloader(self, batch_size: int | None = None) -> DataLoader:
@@ -375,8 +373,9 @@ class EEGDataModule:
             self.test_dataset,
             batch_size=bs,
             shuffle=False,
-            num_workers=0,  # Must be 0 for lazy loading with caching
+            num_workers=4,
             pin_memory=True,
+            persistent_workers=True,
         )
 
     @property
