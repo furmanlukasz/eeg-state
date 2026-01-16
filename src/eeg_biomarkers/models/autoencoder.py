@@ -111,12 +111,12 @@ class ConvLSTMAutoencoder(nn.Module):
         cos_sim = torch.mm(normalized, normalized.t())
 
         # Clamp to [-1+eps, 1-eps] for numerical stability
-        # Even tiny floating-point overshoots outside [-1,1] can cause NaNs or
-        # segfaults in torch.acos on some hardware/builds
-        cos_sim = torch.clamp(cos_sim, -1.0 + eps, 1.0 - eps)
-
-        # Convert to angular distance
-        angular_dist = torch.acos(cos_sim)
+        # torch.acos can segfault on some hardware even with valid inputs
+        # Use numpy for safety (this is not in training loop anyway)
+        cos_sim_np = cos_sim.detach().cpu().numpy()
+        cos_sim_np = np.clip(cos_sim_np, -1.0 + 1e-7, 1.0 - 1e-7)
+        angular_dist_np = np.arccos(cos_sim_np)
+        angular_dist = torch.from_numpy(angular_dist_np).to(latent.device)
 
         return angular_dist
 

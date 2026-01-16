@@ -52,6 +52,9 @@ uv run python -m eeg_biomarkers.experiments.integration_experiment \
 
 ```bash
 uv run pytest tests/ -v
+
+# On macOS/Apple Silicon, some tests may segfault due to torch/MPS issues
+# Tests run cleanly on Linux (RunPod/CUDA)
 ```
 
 ## Data
