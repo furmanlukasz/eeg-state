@@ -28,7 +28,8 @@ NC='\033[0m' # No Color
 # Configuration - EDIT THESE
 REPO_URL="${REPO_URL:-https://github.com/furmanlukasz/eeg-state.git}"
 REPO_DIR="${REPO_DIR:-/workspace/eeg-state}"
-DATA_SOURCE="${DATA_SOURCE:-}"  # Set this to your data location (e.g., /runpod-volume/data)
+# Default to /workspace/data on RunPod (standard location)
+DATA_SOURCE="${DATA_SOURCE:-/workspace/data}"
 
 # ---------------------------------------------
 # 1. System Info
@@ -140,15 +141,23 @@ else:
 echo -e "\n${YELLOW}[6/7] Setting up data directory${NC}"
 DATA_DIR="$REPO_DIR/data"
 
+# Check if we're on RunPod and /workspace/data exists
+if [ -d "/workspace/data" ]; then
+    echo "Detected RunPod environment with data at /workspace/data"
+    DATA_SOURCE="/workspace/data"
+fi
+
 if [ -n "$DATA_SOURCE" ] && [ -d "$DATA_SOURCE" ]; then
-    # Link to external data source
+    # Link to external data source (removes existing dir/link first)
     if [ -L "$DATA_DIR" ]; then
         rm "$DATA_DIR"
+    elif [ -d "$DATA_DIR" ]; then
+        rm -rf "$DATA_DIR"
     fi
     ln -sf "$DATA_SOURCE" "$DATA_DIR"
-    echo -e "${GREEN}Data linked from $DATA_SOURCE${NC}"
+    echo -e "${GREEN}Data symlinked: $DATA_DIR -> $DATA_SOURCE${NC}"
 elif [ -d "$DATA_DIR" ]; then
-    echo "Data directory exists"
+    echo "Data directory exists at $DATA_DIR"
 else
     mkdir -p "$DATA_DIR"
     echo -e "${YELLOW}Data directory created at $DATA_DIR${NC}"
@@ -158,10 +167,10 @@ else
     echo "    data/MCI/subject_*/  (MCI patients)"
 fi
 
-# Count data files if they exist
+# Count data files if they exist (follow symlinks)
 if [ -d "$DATA_DIR/HID" ] || [ -d "$DATA_DIR/MCI" ]; then
-    HC_COUNT=$(find "$DATA_DIR/HID" -name "*_eeg.fif" 2>/dev/null | wc -l)
-    MCI_COUNT=$(find "$DATA_DIR/MCI" -name "*_eeg.fif" 2>/dev/null | wc -l)
+    HC_COUNT=$(find -L "$DATA_DIR/HID" -name "*_eeg.fif" 2>/dev/null | wc -l)
+    MCI_COUNT=$(find -L "$DATA_DIR/MCI" -name "*_eeg.fif" 2>/dev/null | wc -l)
     echo "  Found: $HC_COUNT HC files, $MCI_COUNT MCI files"
 fi
 
@@ -183,8 +192,10 @@ else
     PY="uv run python"
 fi
 
+# Use runpod config for proper data path handling
 $PY -m eeg_biomarkers.training.train \
-    data=full \
+    data=runpod \
+    paths.data_dir=data \
     training.epochs=${EPOCHS:-300} \
     model.encoder.hidden_size=${HIDDEN_SIZE:-128} \
     training.batch_size=${BATCH_SIZE:-64} \
