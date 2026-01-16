@@ -1010,11 +1010,22 @@ def run_single_fold(
     if skip_hf_validation:
         diagnostics = FoldDiagnosticReport(
             fold_idx=fold_idx,
-            hf1_correlation_raw=None,
-            hf1_correlation_residualized=None,
+            hf1_correlation_raw=0.0,  # Placeholder - not computed
             hf2_correlation_raw=None,
+            hf1_correlation_residualized=0.0,  # Placeholder - not computed
+            hf2_correlation_residualized=None,
             hf1_temporal_central_ratio=None,
-            hf1_state_prediction_accuracy=None,
+            hf2_temporal_central_ratio=None,
+            hf_state_prediction_accuracy=None,
+            hf_state_kruskal_pvalue=None,
+            baseline_auc=None,
+            state_conditioned_auc=None,
+            raw_latent_auc=None,
+            residualized_latent_auc=None,
+            n_train_segments=len(train_idx),
+            n_test_segments=len(test_idx),
+            n_train_subjects=len(np.unique(subj_train)),
+            n_test_subjects=len(np.unique(subj_test)),
         )
     else:
         diagnostics = compute_fold_diagnostics(
