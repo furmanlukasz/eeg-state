@@ -51,13 +51,20 @@ fi
 # 2. Install UV (fast Python package manager)
 # ---------------------------------------------
 echo -e "\n${YELLOW}[2/7] Installing UV${NC}"
+
+# Always ensure UV paths are in current session
+export PATH="$HOME/.local/bin:$HOME/.cargo/bin:$PATH"
+
 if command -v uv &> /dev/null; then
     echo "UV already installed: $(uv --version)"
 else
     curl -LsSf https://astral.sh/uv/install.sh | sh
-    export PATH="$HOME/.cargo/bin:$PATH"
-    echo 'export PATH="$HOME/.cargo/bin:$PATH"' >> ~/.bashrc
-    echo -e "${GREEN}UV installed: $(uv --version)${NC}"
+    # Source the env file if it exists (UV installer creates this)
+    [ -f "$HOME/.local/bin/env" ] && source "$HOME/.local/bin/env"
+    # Add to PATH for this session and future sessions
+    export PATH="$HOME/.local/bin:$HOME/.cargo/bin:$PATH"
+    echo 'export PATH="$HOME/.local/bin:$HOME/.cargo/bin:$PATH"' >> ~/.bashrc
+    echo -e "${GREEN}UV installed: $(uv --version 2>/dev/null || echo 'install pending')${NC}"
 fi
 
 # ---------------------------------------------
@@ -181,19 +188,29 @@ fi
 # ---------------------------------------------
 echo -e "\n${YELLOW}[7/7] Creating convenience scripts${NC}"
 
+# Create logs directory
+mkdir -p "$REPO_DIR/logs"
+
 # Training script - use python directly since RunPod has torch pre-installed
 cat > "$REPO_DIR/run_train.sh" << 'TRAIN_EOF'
 #!/bin/bash
 # Train the autoencoder on full dataset
 cd /workspace/eeg-state
 
+# Create logs dir if needed
+mkdir -p logs
+
 # Use runpod config for proper data path handling
+# WandB disabled by default - enable with: WANDB=true ./run_train.sh
+WANDB_ENABLED=${WANDB:-false}
+
 python -m eeg_biomarkers.training.train \
     data=runpod \
     paths.data_dir=data \
     training.epochs=${EPOCHS:-300} \
     model.encoder.hidden_size=${HIDDEN_SIZE:-128} \
     training.batch_size=${BATCH_SIZE:-64} \
+    logging.wandb.enabled=$WANDB_ENABLED \
     "$@"
 TRAIN_EOF
 chmod +x "$REPO_DIR/run_train.sh"

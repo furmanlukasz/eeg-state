@@ -33,6 +33,7 @@ HIDDEN_SIZE=${HIDDEN_SIZE:-128}
 BATCH_SIZE=${BATCH_SIZE:-64}
 N_FOLDS=${N_FOLDS:-5}
 N_SEEDS=${N_SEEDS:-3}
+WANDB_ENABLED=${WANDB:-false}  # WandB disabled by default
 
 # Use python directly (RunPod has torch pre-installed)
 PY="python"
@@ -59,6 +60,7 @@ echo "  BATCH_SIZE: $BATCH_SIZE"
 echo "  N_FOLDS: $N_FOLDS"
 echo "  N_SEEDS: $N_SEEDS"
 echo "  PARALLEL: $PARALLEL"
+echo "  WANDB: $WANDB_ENABLED"
 echo "  Python: $PY"
 echo ""
 
@@ -83,6 +85,7 @@ train_model() {
         model.encoder.hidden_size=$HIDDEN_SIZE \
         training.batch_size=$BATCH_SIZE \
         model.phase.include_amplitude=$include_amp \
+        logging.wandb.enabled=$WANDB_ENABLED \
         experiment.name="$name" \
         2>&1 | tee "logs/train_${name}.log"
 

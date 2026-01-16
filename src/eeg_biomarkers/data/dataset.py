@@ -5,12 +5,14 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Literal
 import logging
+import gc
 
 import numpy as np
 import torch
 from torch.utils.data import Dataset, DataLoader
-from sklearn.model_selection import GroupKFold, train_test_split
+from sklearn.model_selection import train_test_split
 from omegaconf import DictConfig
+from tqdm import tqdm
 
 from eeg_biomarkers.data.preprocessing import (
     load_eeg_file,
@@ -105,67 +107,93 @@ class EEGDataModule:
         all_labels = []
         all_subject_ids = []
 
-        # Load each group
+        # First pass: collect all files to process (for progress bar)
+        files_to_process = []
         for group_idx, group in enumerate(self.cfg.data.groups):
             group_name = group.name
             group_path = self.data_dir / group.path
-
             self._label_map[group_name] = group_idx
-            logger.info(f"Loading group: {group_name} from {group_path}")
+
+            if not group_path.exists():
+                logger.warning(f"Group path does not exist: {group_path}")
+                continue
 
             # Get subject directories
             subject_dirs = sorted([d for d in group_path.iterdir() if d.is_dir()])
 
-            # FIX: Randomize subject sampling before truncating to avoid systematic bias
-            # (e.g., alphabetical order correlating with recruitment date)
+            # Randomize subject sampling to avoid systematic bias
             n_subjects = self.cfg.data.sampling.n_subjects_per_group
             if n_subjects is not None and n_subjects < len(subject_dirs):
                 rng = np.random.RandomState(self.cfg.data.sampling.random_seed)
                 indices = rng.permutation(len(subject_dirs))[:n_subjects]
-                subject_dirs = [subject_dirs[i] for i in sorted(indices)]  # sort for reproducibility
+                subject_dirs = [subject_dirs[i] for i in sorted(indices)]
             elif n_subjects is not None:
                 subject_dirs = subject_dirs[:n_subjects]
 
             for subject_dir in subject_dirs:
                 subject_id = subject_dir.name
-
-                # FIX: Use recursive glob to find files in nested directories
-                fif_files = list(subject_dir.rglob("*_eeg.fif"))
-                if not fif_files:
-                    # Also try non-recursive for backwards compatibility
-                    fif_files = list(subject_dir.glob("*_eeg.fif"))
-                if not fif_files:
-                    logger.warning(f"No EEG files found for subject {subject_id}")
-
+                # Filter out macOS metadata files (._*)
+                fif_files = [
+                    f for f in subject_dir.rglob("*_eeg.fif")
+                    if not f.name.startswith("._")
+                ]
                 for fif_file in fif_files:
-                    try:
-                        # Load and preprocess
-                        raw = load_eeg_file(
-                            fif_file,
-                            filter_low=self.cfg.data.preprocessing.filter_low,
-                            filter_high=self.cfg.data.preprocessing.filter_high,
-                            reference=self.cfg.data.preprocessing.reference,
-                            notch_freq=self.cfg.data.preprocessing.notch_freq,
-                        )
+                    files_to_process.append((fif_file, subject_id, group_idx, group_name))
 
-                        # Extract phase chunks
-                        chunks, mask, _ = prepare_phase_chunks(
-                            raw,
-                            chunk_duration=self.cfg.data.preprocessing.chunk_duration,
-                            chunk_overlap=self.cfg.data.preprocessing.chunk_overlap,
-                            include_amplitude=self.cfg.model.phase.include_amplitude,
-                        )
+        logger.info(f"Found {len(files_to_process)} EEG files to process")
 
-                        n_chunks = chunks.shape[0]
-                        all_chunks.append(chunks)
-                        all_masks.append(mask)
-                        all_labels.extend([group_idx] * n_chunks)
-                        all_subject_ids.extend([subject_id] * n_chunks)
+        # Second pass: load files with progress bar
+        n_failed = 0
+        with tqdm(files_to_process, desc="Loading EEG data", unit="file") as pbar:
+            for fif_file, subject_id, group_idx, group_name in pbar:
+                pbar.set_postfix(subject=subject_id[:15], group=group_name)
+                try:
+                    # Load and preprocess
+                    raw = load_eeg_file(
+                        fif_file,
+                        filter_low=self.cfg.data.preprocessing.filter_low,
+                        filter_high=self.cfg.data.preprocessing.filter_high,
+                        reference=self.cfg.data.preprocessing.reference,
+                        notch_freq=self.cfg.data.preprocessing.notch_freq,
+                    )
 
-                    except Exception as e:
-                        logger.warning(f"Failed to load {fif_file}: {e}")
+                    # Extract phase chunks
+                    chunks, mask, _ = prepare_phase_chunks(
+                        raw,
+                        chunk_duration=self.cfg.data.preprocessing.chunk_duration,
+                        chunk_overlap=self.cfg.data.preprocessing.chunk_overlap,
+                        include_amplitude=self.cfg.model.phase.include_amplitude,
+                    )
+
+                    # Convert to float32 immediately to save memory (default is float64)
+                    chunks = chunks.astype(np.float32)
+
+                    n_chunks = chunks.shape[0]
+                    all_chunks.append(chunks)
+                    all_masks.append(mask)
+                    all_labels.extend([group_idx] * n_chunks)
+                    all_subject_ids.extend([subject_id] * n_chunks)
+
+                    # Free memory
+                    del raw, chunks, mask
+                    gc.collect()
+
+                except Exception as e:
+                    n_failed += 1
+                    # Only log first few failures to avoid spam
+                    if n_failed <= 5:
+                        logger.warning(f"Failed to load {fif_file.name}: {e}")
+                    elif n_failed == 6:
+                        logger.warning("Suppressing further load warnings...")
+
+        if n_failed > 0:
+            logger.warning(f"Total files failed to load: {n_failed}")
+
+        if not all_chunks:
+            raise RuntimeError("No data loaded! Check your data paths and file formats.")
 
         # Concatenate all data
+        logger.info("Concatenating data...")
         all_chunks = np.concatenate(all_chunks, axis=0)
         all_masks = np.concatenate(all_masks, axis=0)
         all_labels = np.array(all_labels)

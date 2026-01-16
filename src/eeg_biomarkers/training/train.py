@@ -30,17 +30,32 @@ def setup_logging(cfg: DictConfig) -> None:
     )
 
 
-def setup_wandb(cfg: DictConfig) -> None:
-    """Initialize Weights & Biases."""
-    if not cfg.logging.wandb.enabled or not WANDB_AVAILABLE:
-        return
+def setup_wandb(cfg: DictConfig) -> bool:
+    """Initialize Weights & Biases.
 
-    wandb.init(
-        project=cfg.logging.wandb.project,
-        entity=cfg.logging.wandb.entity,
-        name=cfg.experiment.name,
-        config=OmegaConf.to_container(cfg, resolve=True),
-    )
+    Returns:
+        True if WandB was successfully initialized, False otherwise.
+    """
+    if not cfg.logging.wandb.enabled:
+        logger.info("WandB logging disabled")
+        return False
+
+    if not WANDB_AVAILABLE:
+        logger.warning("WandB requested but not installed")
+        return False
+
+    try:
+        wandb.init(
+            project=cfg.logging.wandb.project,
+            entity=cfg.logging.wandb.entity,
+            name=cfg.experiment.name,
+            config=OmegaConf.to_container(cfg, resolve=True),
+        )
+        return True
+    except Exception as e:
+        logger.warning(f"WandB initialization failed: {e}")
+        logger.info("Continuing without WandB logging")
+        return False
 
 
 def set_seed(seed: int) -> None:
@@ -73,7 +88,7 @@ def main(cfg: DictConfig) -> None:
     # Setup
     setup_logging(cfg)
     set_seed(cfg.experiment.seed)
-    setup_wandb(cfg)
+    wandb_enabled = setup_wandb(cfg)
 
     logger.info("Configuration:")
     logger.info(OmegaConf.to_yaml(cfg))
@@ -117,7 +132,7 @@ def main(cfg: DictConfig) -> None:
     # Log final metrics
     logger.info(f"Training complete. Best val loss: {trainer.best_val_loss:.4f}")
 
-    if WANDB_AVAILABLE and cfg.logging.wandb.enabled:
+    if wandb_enabled:
         wandb.finish()
 
     return trainer.best_val_loss
