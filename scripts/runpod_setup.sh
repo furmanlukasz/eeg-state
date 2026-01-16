@@ -7,7 +7,7 @@
 # 3. Install additional dependencies (not torch)
 #
 # Usage:
-#   curl -sSL https://raw.githubusercontent.com/furmanlukasz/eeg-state-biomarkers/main/scripts/runpod_setup.sh | bash
+#   curl -sSL https://raw.githubusercontent.com/furmanlukasz/eeg-state/main/scripts/runpod_setup.sh | bash
 #
 # Or if repo is already cloned:
 #   bash scripts/runpod_setup.sh
@@ -26,8 +26,8 @@ YELLOW='\033[1;33m'
 NC='\033[0m' # No Color
 
 # Configuration - EDIT THESE
-REPO_URL="${REPO_URL:-https://github.com/furmanlukasz/eeg-state-biomarkers.git}"
-REPO_DIR="${REPO_DIR:-/workspace/eeg-state-biomarkers}"
+REPO_URL="${REPO_URL:-https://github.com/furmanlukasz/eeg-state.git}"
+REPO_DIR="${REPO_DIR:-/workspace/eeg-state}"
 DATA_SOURCE="${DATA_SOURCE:-}"  # Set this to your data location (e.g., /runpod-volume/data)
 
 # ---------------------------------------------
@@ -174,7 +174,7 @@ echo -e "\n${YELLOW}[7/7] Creating convenience scripts${NC}"
 cat > "$REPO_DIR/run_train.sh" << 'TRAIN_EOF'
 #!/bin/bash
 # Train the autoencoder on full dataset
-cd /workspace/eeg-state-biomarkers
+cd /workspace/eeg-state
 
 # Use system python if available (RunPod), else uv
 if [ "${USE_SYSTEM_PYTHON:-false}" = true ]; then
@@ -196,7 +196,7 @@ chmod +x "$REPO_DIR/run_train.sh"
 cat > "$REPO_DIR/run_experiment.sh" << 'EXP_EOF'
 #!/bin/bash
 # Run integration experiment
-cd /workspace/eeg-state-biomarkers
+cd /workspace/eeg-state
 
 # Use system python if available (RunPod), else uv
 if [ "${USE_SYSTEM_PYTHON:-false}" = true ]; then
@@ -219,7 +219,7 @@ chmod +x "$REPO_DIR/run_experiment.sh"
 cat > "$REPO_DIR/run_tests.sh" << 'TEST_EOF'
 #!/bin/bash
 # Run tests
-cd /workspace/eeg-state-biomarkers
+cd /workspace/eeg-state
 
 # Use system python if available (RunPod), else uv
 if [ "${USE_SYSTEM_PYTHON:-false}" = true ]; then
