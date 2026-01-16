@@ -20,6 +20,8 @@ classifiers = [
 
 dependencies = [
     # Core ML/DL
+    # Note: torch>=2.0 is pre-installed on RunPod (2.4)
+    # UV will skip if already satisfied
     "torch>=2.0",
     "numpy>=1.24",
     "scipy>=1.10",
