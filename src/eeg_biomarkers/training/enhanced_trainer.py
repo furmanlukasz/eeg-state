@@ -62,10 +62,10 @@ class ContrastiveLoss(nn.Module):
         """
         batch_size = embeddings.shape[0]
         if batch_size < 2:
-            return torch.tensor(0.0, device=embeddings.device)
+            return torch.tensor(0.0, device=embeddings.device, requires_grad=True)
 
-        # L2 normalize embeddings
-        embeddings = F.normalize(embeddings, dim=1)
+        # L2 normalize embeddings (with eps for stability)
+        embeddings = F.normalize(embeddings, dim=1, eps=1e-8)
 
         # Compute similarity matrix
         sim_matrix = torch.mm(embeddings, embeddings.t()) / self.temperature
@@ -75,7 +75,8 @@ class ContrastiveLoss(nn.Module):
         mask = torch.eq(labels, labels.t()).float()
 
         # Remove diagonal (self-similarity)
-        mask = mask - torch.eye(batch_size, device=mask.device)
+        diag_mask = torch.eye(batch_size, device=mask.device)
+        mask = mask - diag_mask
 
         # Count positive pairs for each sample
         pos_count = mask.sum(dim=1)
@@ -84,28 +85,32 @@ class ContrastiveLoss(nn.Module):
         valid_samples = pos_count > 0
 
         if not valid_samples.any():
-            return torch.tensor(0.0, device=embeddings.device)
+            return torch.tensor(0.0, device=embeddings.device, requires_grad=True)
 
-        # Compute log-softmax for each row
-        # Subtract max for numerical stability
-        sim_matrix = sim_matrix - sim_matrix.max(dim=1, keepdim=True)[0].detach()
+        # For numerical stability: subtract max per row
+        sim_max, _ = sim_matrix.max(dim=1, keepdim=True)
+        sim_matrix = sim_matrix - sim_max.detach()
 
-        # Mask out self-similarity
-        self_mask = torch.eye(batch_size, device=sim_matrix.device).bool()
-        sim_matrix = sim_matrix.masked_fill(self_mask, float('-inf'))
+        # Compute exp(sim) with self-similarity zeroed out
+        exp_sim = torch.exp(sim_matrix) * (1 - diag_mask)
 
-        # Log-sum-exp over all negatives + positives
-        log_sum_exp = torch.logsumexp(sim_matrix, dim=1)
+        # Sum of exp for denominator (all pairs except self)
+        sum_exp = exp_sim.sum(dim=1) + 1e-8  # Add eps to prevent log(0)
 
-        # Sum of positive similarities
-        pos_sim = (sim_matrix * mask).sum(dim=1)
+        # Sum of exp for positive pairs only
+        pos_exp_sum = (exp_sim * mask).sum(dim=1)
 
-        # Contrastive loss: -log(sum of positives / sum of all)
-        # = -sum_pos + log_sum_exp
-        loss_per_sample = -pos_sim / (pos_count + 1e-8) + log_sum_exp
+        # For valid samples: -log(pos_exp_sum / sum_exp)
+        # = -log(pos_exp_sum) + log(sum_exp)
+        # But we need per-positive average, so: -log(pos_exp_sum / pos_count / sum_exp * pos_count)
+        # Simplified: -log(pos_exp_sum / sum_exp)
+        loss_per_sample = -torch.log(pos_exp_sum / sum_exp + 1e-8)
 
-        # Average over valid samples only
+        # Only average over samples that have positive pairs
         loss = loss_per_sample[valid_samples].mean()
+
+        # Clamp to prevent extreme values
+        loss = torch.clamp(loss, min=0.0, max=100.0)
 
         return loss
 
