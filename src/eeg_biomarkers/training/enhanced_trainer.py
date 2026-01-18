@@ -373,11 +373,34 @@ class EnhancedTrainer:
             if labels is not None:
                 labels = labels.to(self.device) if isinstance(labels, torch.Tensor) else labels
 
+            # Check input data for NaN/Inf
+            if torch.isnan(data).any() or torch.isinf(data).any():
+                logger.error(f"NaN/Inf in INPUT data at batch {n_batches}!")
+                logger.error(f"  data stats: min={data.min():.4f}, max={data.max():.4f}, mean={data.mean():.4f}")
+                raise RuntimeError("Training failed: NaN/Inf in input data.")
+
             # Forward pass
             reconstruction, latent = self.model(data)
 
+            # Check model outputs for NaN/Inf
+            if torch.isnan(reconstruction).any() or torch.isinf(reconstruction).any():
+                logger.error(f"NaN/Inf in RECONSTRUCTION at batch {n_batches}!")
+                logger.error(f"  recon stats: min={reconstruction.min():.4f}, max={reconstruction.max():.4f}")
+                raise RuntimeError("Training failed: NaN/Inf in reconstruction.")
+
+            if torch.isnan(latent).any() or torch.isinf(latent).any():
+                logger.error(f"NaN/Inf in LATENT at batch {n_batches}!")
+                logger.error(f"  latent stats: min={latent.min():.4f}, max={latent.max():.4f}")
+                raise RuntimeError("Training failed: NaN/Inf in latent.")
+
             # Reconstruction loss
             recon_loss, loss_dict = self._compute_reconstruction_loss(data, reconstruction, mask)
+
+            # Check reconstruction loss
+            if torch.isnan(recon_loss) or torch.isinf(recon_loss):
+                logger.error(f"NaN/Inf in RECON LOSS at batch {n_batches}!")
+                logger.error(f"  loss_dict: {loss_dict}")
+                raise RuntimeError("Training failed: NaN/Inf in reconstruction loss.")
 
             # Contrastive loss on mean latent embedding
             contrastive_loss = torch.tensor(0.0, device=self.device)
@@ -386,6 +409,10 @@ class EnhancedTrainer:
                 mean_latent = latent.mean(dim=1)  # (batch, hidden_size)
                 contrastive_loss = self.contrastive_loss(mean_latent, labels)
                 loss_dict['contrastive_loss'] = contrastive_loss.item()
+
+                if torch.isnan(contrastive_loss) or torch.isinf(contrastive_loss):
+                    logger.error(f"NaN/Inf in CONTRASTIVE LOSS at batch {n_batches}!")
+                    raise RuntimeError("Training failed: NaN/Inf in contrastive loss.")
 
             # Triplet loss (optional)
             triplet_loss = torch.tensor(0.0, device=self.device)
@@ -403,7 +430,8 @@ class EnhancedTrainer:
 
             # NaN/Inf detection
             if torch.isnan(loss) or torch.isinf(loss):
-                logger.error(f"NaN/Inf loss detected at batch {n_batches}!")
+                logger.error(f"NaN/Inf TOTAL loss detected at batch {n_batches}!")
+                logger.error(f"  recon_loss={recon_loss.item():.4f}, contrastive={contrastive_loss.item():.4f}")
                 raise RuntimeError("Training failed: NaN/Inf loss detected.")
 
             # Backward pass
