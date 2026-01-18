@@ -64,7 +64,7 @@ from xgboost import XGBClassifier
 
 from eeg_biomarkers.data.preprocessing import load_eeg_file, prepare_phase_chunks
 from eeg_biomarkers.data.dataset import get_cache_key, CachedFileDataset
-from eeg_biomarkers.models import ConvLSTMAutoencoder
+from eeg_biomarkers.models import ConvLSTMAutoencoder, TransformerAutoencoder
 from eeg_biomarkers.analysis.rqa import compute_rqa_features, compute_rqa_from_distance_matrix, RQAFeatures
 from eeg_biomarkers.analysis.artifact_control import (
     compute_hf_power,
@@ -1356,6 +1356,10 @@ def run_experiment(config: ExperimentConfig) -> pd.DataFrame:
     complexity = config.complexity
     phase_channels = 2  # Default: cos, sin only
     include_amplitude = False
+    model_type = "convlstm"  # Default to ConvLSTM
+    n_heads = 4
+    n_transformer_layers = 2
+    dim_feedforward = 256
 
     if 'config' in checkpoint:
         ckpt_cfg = checkpoint['config']
@@ -1371,12 +1375,49 @@ def run_experiment(config: ExperimentConfig) -> pd.DataFrame:
             include_amplitude = True
             logger.info("Checkpoint was trained WITH amplitude (phase_channels=3)")
 
-        logger.info(f"Checkpoint config: hidden_size={hidden_size}, complexity={complexity}, phase_channels={phase_channels}")
+        # Detect model type from config or state dict keys
+        model_name = model_cfg.get('name', 'convlstm_autoencoder')
+        if 'transformer' in model_name.lower():
+            model_type = "transformer"
+            n_heads = encoder_cfg.get('n_heads', 4)
+            n_transformer_layers = encoder_cfg.get('n_transformer_layers', 2)
+            dim_feedforward = encoder_cfg.get('dim_feedforward', 256)
+            logger.info(f"Detected TRANSFORMER model: n_heads={n_heads}, layers={n_transformer_layers}")
+
+        logger.info(f"Checkpoint config: hidden_size={hidden_size}, complexity={complexity}, phase_channels={phase_channels}, model_type={model_type}")
     else:
+        # Detect model type from state dict keys
+        if any("transformer_encoder" in k for k in state_dict_keys):
+            model_type = "transformer"
+            logger.info("Detected TRANSFORMER model from state dict keys")
         logger.warning("No config in checkpoint, using experiment defaults")
 
     # Load data - now with amplitude support based on checkpoint config
     data_dir = Path(config.data_dir)
+
+    # Helper function to create the appropriate model type
+    def create_model(n_ch: int, load_weights: bool = True) -> torch.nn.Module:
+        """Create model based on detected type from checkpoint."""
+        if model_type == "transformer":
+            m = TransformerAutoencoder(
+                n_channels=n_ch,
+                hidden_size=hidden_size,
+                complexity=complexity,
+                phase_channels=phase_channels,
+                n_heads=n_heads,
+                n_transformer_layers=n_transformer_layers,
+                dim_feedforward=dim_feedforward,
+            )
+        else:
+            m = ConvLSTMAutoencoder(
+                n_channels=n_ch,
+                hidden_size=hidden_size,
+                complexity=complexity,
+                phase_channels=phase_channels,
+            )
+        if load_weights:
+            m.load_state_dict(state_dict)
+        return m
 
     if config.use_cache:
         # MEMORY-EFFICIENT: Stream through subjects, compute latents per-subject
@@ -1389,13 +1430,7 @@ def run_experiment(config: ExperimentConfig) -> pd.DataFrame:
         n_channels = n_features // phase_channels
 
         # Create model BEFORE loading data (needed for streaming latent computation)
-        model = ConvLSTMAutoencoder(
-            n_channels=n_channels,
-            hidden_size=hidden_size,
-            complexity=complexity,
-            phase_channels=phase_channels,
-        )
-        model.load_state_dict(state_dict)
+        model = create_model(n_channels, load_weights=True)
 
         # Stream through subjects, computing latents per-subject (~2GB instead of ~25GB)
         latent_trajectories, subject_ids, labels, channel_names, sfreq = load_cached_data_and_compute_latents(
@@ -1428,14 +1463,7 @@ def run_experiment(config: ExperimentConfig) -> pd.DataFrame:
 
         # Create model with checkpoint's config
         n_channels = phase_chunks.shape[1] // phase_channels
-
-        model = ConvLSTMAutoencoder(
-            n_channels=n_channels,
-            hidden_size=hidden_size,
-            complexity=complexity,
-            phase_channels=phase_channels,
-        )
-        model.load_state_dict(state_dict)
+        model = create_model(n_channels, load_weights=True)
 
     logger.info("=" * 60)
     logger.info("AE STATUS: TRAINED")
@@ -1481,13 +1509,7 @@ def run_experiment(config: ExperimentConfig) -> pd.DataFrame:
             # When using cache, we need to stream through subjects again for random model
             # This is slower but memory-safe
             logger.info("Computing latent trajectories (RANDOM model for comparison, streaming)...")
-            model_random = ConvLSTMAutoencoder(
-                n_channels=n_channels,
-                hidden_size=hidden_size,
-                complexity=complexity,
-                phase_channels=phase_channels,
-            )
-            # Don't load any weights - use random initialization
+            model_random = create_model(n_channels, load_weights=False)
             latent_trajectories_random, _, _, _, _ = load_cached_data_and_compute_latents(
                 data_dir,
                 model=model_random,
@@ -1498,13 +1520,7 @@ def run_experiment(config: ExperimentConfig) -> pd.DataFrame:
             logger.info(f"  Random latent trajectory shape: {latent_trajectories_random.shape}")
         else:
             logger.info("Computing latent trajectories (RANDOM model for comparison)...")
-            model_random = ConvLSTMAutoencoder(
-                n_channels=n_channels,
-                hidden_size=hidden_size,  # Use same config as trained model
-                complexity=complexity,
-                phase_channels=phase_channels,
-            )
-            # Don't load any weights - use random initialization
+            model_random = create_model(n_channels, load_weights=False)
             latent_trajectories_random = compute_latent_trajectories(model_random, phase_chunks)
             logger.info(f"  Random latent trajectory shape: {latent_trajectories_random.shape}")
 
