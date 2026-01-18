@@ -1,0 +1,29 @@
+# Transformer model configuration with amplitude and contrastive loss
+name: "transformer_autoencoder"
+
+encoder:
+  complexity: 2  # 0-3, controls network depth (conv layers before transformer)
+  hidden_size: 64  # Transformer dimension
+  dropout: 0.1
+
+  # Transformer-specific settings
+  n_heads: 4  # Number of attention heads
+  n_transformer_layers: 2  # Number of transformer encoder/decoder layers
+  dim_feedforward: 256  # Feedforward dimension in transformer
+
+decoder:
+  # Mirrors encoder by default
+  use_encoder_config: true
+  constrain_output: true  # Apply tanh to cos/sin outputs
+
+# Recurrence matrix settings
+recurrence:
+  threshold_method: "rr_controlled"
+  target_rr: 0.02
+  fixed_epsilon: null
+
+# Phase representation with AMPLITUDE
+phase:
+  representation: "circular"
+  include_amplitude: true  # INCLUDE AMPLITUDE
+  normalize_amplitude: true  # Z-score normalize (recommended)

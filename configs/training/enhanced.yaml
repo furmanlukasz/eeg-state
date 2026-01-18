@@ -1,0 +1,67 @@
+# Enhanced training configuration with contrastive loss
+# Use with transformer model for best results
+
+# Training loop
+epochs: 200  # More epochs for contrastive learning
+batch_size: 64
+gradient_accumulation_steps: 1
+
+# Gradient clipping
+gradient_clip_norm: 1.0
+
+# Early stopping
+early_stopping:
+  enabled: true
+  patience: 30  # More patience for contrastive learning
+  min_delta: 0.001
+  monitor: "val_loss"
+
+# Checkpointing
+checkpointing:
+  enabled: true
+  save_every_n_epochs: 20
+  save_best: true
+  save_last: true
+
+# Optimizer (lower LR for transformer stability)
+optimizer:
+  name: "adamw"
+  lr: 0.0005  # Lower LR for transformer
+  weight_decay: 0.01
+  betas: [0.9, 0.999]
+
+# Learning rate scheduler
+scheduler:
+  name: "cosine"
+  warmup_epochs: 10  # More warmup for transformer
+  min_lr: 0.00001
+  factor: 0.5
+  patience: 10
+
+# Loss function
+loss:
+  name: "mse_contrastive"
+
+# Loss component weighting
+lambda_reconstruction: 1.0  # Weight for total reconstruction loss
+lambda_phase: 1.0           # Weight for cos/sin reconstruction
+lambda_amplitude: 0.5       # Lower weight for amplitude (it can dominate)
+lambda_unit_circle: 0.1     # Unit-circle regularization
+
+# Contrastive loss settings (NEW)
+lambda_contrastive: 0.1     # Weight for contrastive loss
+lambda_triplet: 0.0         # Weight for triplet loss (off by default)
+contrastive_temperature: 0.07  # Temperature for contrastive softmax
+triplet_margin: 0.5         # Margin for triplet loss
+contrastive_mode: "condition"  # "condition" (HC vs MCI) or "subject"
+
+# Regularization
+regularization:
+  label_smoothing: 0.0
+  mixup_alpha: 0.0
+
+# Validation
+validation:
+  enabled: true
+  frequency: 1
+  subset_fraction: null

@@ -15,9 +15,10 @@ try:
 except ImportError:
     WANDB_AVAILABLE = False
 
-from eeg_biomarkers.models import ConvLSTMAutoencoder
+from eeg_biomarkers.models import ConvLSTMAutoencoder, TransformerAutoencoder
 from eeg_biomarkers.data import EEGDataModule
 from eeg_biomarkers.training.trainer import Trainer
+from eeg_biomarkers.training.enhanced_trainer import EnhancedTrainer
 
 logger = logging.getLogger(__name__)
 
@@ -107,10 +108,18 @@ def main(cfg: DictConfig) -> None:
     train_loader = data_module.train_dataloader()
     val_loader = data_module.val_dataloader()
 
-    # Create model
+    # Create model based on config
     logger.info("Creating model...")
     n_channels = data_module.n_channels
-    model = ConvLSTMAutoencoder.from_config(cfg.model, n_channels)
+    model_name = getattr(cfg.model, 'name', 'convlstm_autoencoder')
+
+    if model_name == "transformer_autoencoder":
+        model = TransformerAutoencoder.from_config(cfg.model, n_channels)
+        logger.info("Using TransformerAutoencoder (self-attention)")
+    else:
+        model = ConvLSTMAutoencoder.from_config(cfg.model, n_channels)
+        logger.info("Using ConvLSTMAutoencoder (LSTM)")
+
     logger.info(f"Model: {model}")
 
     # Count parameters
@@ -118,8 +127,19 @@ def main(cfg: DictConfig) -> None:
     n_trainable = sum(p.numel() for p in model.parameters() if p.requires_grad)
     logger.info(f"Parameters: {n_params:,} total, {n_trainable:,} trainable")
 
-    # Create trainer
-    trainer = Trainer(model, cfg, device=cfg.experiment.device)
+    # Create trainer - use EnhancedTrainer for transformer or if contrastive loss enabled
+    use_enhanced = (
+        model_name == "transformer_autoencoder" or
+        getattr(cfg.training, 'lambda_contrastive', 0.0) > 0
+    )
+
+    if use_enhanced:
+        contrastive_mode = getattr(cfg.training, 'contrastive_mode', 'condition')
+        trainer = EnhancedTrainer(model, cfg, device=cfg.experiment.device, contrastive_mode=contrastive_mode)
+        logger.info(f"Using EnhancedTrainer with contrastive loss (mode={contrastive_mode})")
+    else:
+        trainer = Trainer(model, cfg, device=cfg.experiment.device)
+        logger.info("Using standard Trainer")
 
     # Train
     logger.info("Starting training...")
