@@ -683,10 +683,15 @@ def main():
         group = "HC" if label == 0 else "MCI"
 
         logger.info(f"Processing subject {i+1}/{len(unique_subjects)}: {subject_id} ({group})")
+        logger.info(f"  Input phase_data shape: {phase_data.shape} (n_features, n_samples)")
+        logger.info(f"  Input duration: {phase_data.shape[1] / args.sfreq:.2f} seconds")
 
         # Compute latent trajectory
         latent = compute_latent_trajectory(model, phase_data)
         latents_by_label[label].append(latent)
+
+        logger.info(f"  Latent trajectory shape: {latent.shape} (n_time, hidden_size)")
+        logger.info(f"  Latent duration: {latent.shape[0] / args.sfreq:.2f} seconds")
 
         # Compute distance matrix
         distance_matrix = compute_angular_distance_matrix(latent)
