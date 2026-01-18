@@ -443,10 +443,21 @@ def compute_latent_trajectory(
     x = torch.from_numpy(phase_data).float().unsqueeze(0).to(device)
 
     with torch.no_grad():
-        _, latent = model(x)  # latent: (1, hidden_size, T)
+        _, latent = model(x)
 
-    # Return as (T, hidden_size)
-    return latent.squeeze(0).permute(1, 0).cpu().numpy()
+    # Handle different model output formats
+    # TransformerAutoencoder: latent is (batch, time, hidden_size)
+    # ConvLSTMAutoencoder: latent is (batch, hidden_size, time)
+    latent = latent.squeeze(0)  # Remove batch dim
+
+    # Check shape to determine format
+    # If shape is (hidden_size, time) where hidden_size < time, transpose
+    if latent.shape[0] < latent.shape[1]:
+        # Likely (hidden_size, time) -> transpose to (time, hidden_size)
+        latent = latent.permute(1, 0)
+    # else: already (time, hidden_size)
+
+    return latent.cpu().numpy()
 
 
 def load_cached_subjects(
