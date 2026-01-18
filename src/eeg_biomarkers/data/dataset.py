@@ -298,6 +298,14 @@ class EEGDataModule:
                     # Check if cached
                     if cache_path.exists():
                         n_cached += 1
+                        # Extract n_channels from cached file if not yet set
+                        if self._n_channels is None:
+                            try:
+                                cached_data = torch.load(cache_path, weights_only=False)
+                                if "info" in cached_data and "n_channels" in cached_data["info"]:
+                                    self._n_channels = cached_data["info"]["n_channels"]
+                            except Exception:
+                                pass  # Will be set during preprocessing if needed
                     else:
                         # Preprocess and cache
                         if self._preprocess_and_cache_file(fif_file, cache_path):
