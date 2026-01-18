@@ -20,7 +20,14 @@ class PositionalEncoding(nn.Module):
         div_term = torch.exp(torch.arange(0, d_model, 2).float() * (-math.log(10000.0) / d_model))
 
         pe[:, 0::2] = torch.sin(position * div_term)
-        pe[:, 1::2] = torch.cos(position * div_term)
+        # Handle both even and odd d_model
+        if d_model % 2 == 0:
+            pe[:, 1::2] = torch.cos(position * div_term)
+        else:
+            pe[:, 1::2] = torch.cos(position * div_term[:-1])
+
+        # Scale down to prevent large values dominating input
+        pe = pe * 0.1
         pe = pe.unsqueeze(0)
 
         self.register_buffer('pe', pe)
@@ -127,6 +134,29 @@ class TemporalTransformerDecoder(nn.Module):
 
         self.deconv_layers = nn.Sequential(*deconv_layers)
 
+        # Pre-transformer layer norm for stability
+        self.pre_transformer_norm = nn.LayerNorm(hidden_size)
+
+        # Initialize weights
+        self._init_weights()
+
+    def _init_weights(self) -> None:
+        """Initialize weights with Xavier/Kaiming for stability."""
+        for module in self.modules():
+            if isinstance(module, nn.Linear):
+                nn.init.xavier_uniform_(module.weight, gain=0.1)
+                if module.bias is not None:
+                    nn.init.zeros_(module.bias)
+            elif isinstance(module, (nn.Conv1d, nn.ConvTranspose1d)):
+                nn.init.kaiming_normal_(module.weight, mode='fan_out', nonlinearity='relu')
+                if module.bias is not None:
+                    nn.init.zeros_(module.bias)
+            elif isinstance(module, (nn.BatchNorm1d, nn.LayerNorm)):
+                if module.weight is not None:
+                    nn.init.ones_(module.weight)
+                if module.bias is not None:
+                    nn.init.zeros_(module.bias)
+
     def _deconv_block(
         self, in_channels: int, out_channels: int, dropout: float, final: bool = False
     ) -> nn.Sequential:
@@ -157,8 +187,11 @@ class TemporalTransformerDecoder(nn.Module):
         Returns:
             reconstruction: Reconstructed signal (batch, channels, time)
         """
+        # Pre-transformer layer norm for stability
+        x = self.pre_transformer_norm(latent)
+
         # Add positional encoding
-        x = self.pos_encoder(latent)
+        x = self.pos_encoder(x)
 
         # Transformer decoding
         x = self.transformer_decoder(x)
