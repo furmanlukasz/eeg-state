@@ -458,6 +458,10 @@ def load_cached_subjects(
     """
     Load cached phase data for subjects.
 
+    Supports two cache formats:
+    1. New format: cache_dir/{cache_key}.pt with "chunks" key
+    2. Preprocessed format: cache_dir/{condition}/FILT/{subject}/*.pt with "phase_data" key
+
     Returns:
         phase_data_list, subject_ids, labels
     """
@@ -465,6 +469,80 @@ def load_cached_subjects(
     subject_ids = []
     labels = []
 
+    # Try preprocessed_data format first (recursive .pt search)
+    pt_files = list(cache_dir.rglob("*.pt"))
+
+    if pt_files:
+        logger.info(f"  Found {len(pt_files)} .pt files in {cache_dir}")
+
+        for pt_file in sorted(pt_files):
+            # Determine label from path (HC/HID = 0, MCI/AD = 1)
+            path_str = str(pt_file).upper()
+            if "/HID/" in path_str or "/HC/" in path_str or "\\HID\\" in path_str or "\\HC\\" in path_str:
+                label = 0
+            elif "/MCI/" in path_str or "/AD/" in path_str or "\\MCI\\" in path_str or "\\AD\\" in path_str:
+                label = 1
+            else:
+                logger.warning(f"  Cannot determine label for {pt_file}, skipping")
+                continue
+
+            # Extract subject ID from path or filename
+            # Format: .../S017 20140124 0857/S017 20140124 0857_good_1_eeg_xxx.pt
+            subject_id = pt_file.parent.name.split()[0] if pt_file.parent.name.startswith("S") else pt_file.stem.split("_")[0]
+
+            try:
+                cached = torch.load(pt_file, weights_only=False, map_location="cpu")
+
+                # Handle different cache formats
+                if "chunks" in cached:
+                    # New format: list of chunks
+                    chunks = cached["chunks"]
+                    for chunk in chunks:
+                        data = chunk.numpy() if isinstance(chunk, torch.Tensor) else chunk
+                        phase_data_list.append(data)
+                        subject_ids.append(subject_id)
+                        labels.append(label)
+                elif "phase_data" in cached:
+                    # Preprocessed format: single phase_data array
+                    data = cached["phase_data"]
+                    if isinstance(data, torch.Tensor):
+                        data = data.numpy()
+                    phase_data_list.append(data)
+                    subject_ids.append(subject_id)
+                    labels.append(label)
+                elif isinstance(cached, torch.Tensor):
+                    # Raw tensor format
+                    phase_data_list.append(cached.numpy())
+                    subject_ids.append(subject_id)
+                    labels.append(label)
+                elif isinstance(cached, np.ndarray):
+                    # Raw numpy format
+                    phase_data_list.append(cached)
+                    subject_ids.append(subject_id)
+                    labels.append(label)
+                else:
+                    # Try to find any tensor/array in the dict
+                    for key, value in cached.items():
+                        if isinstance(value, (torch.Tensor, np.ndarray)):
+                            data = value.numpy() if isinstance(value, torch.Tensor) else value
+                            if data.ndim == 2:  # (n_features, n_samples)
+                                phase_data_list.append(data)
+                                subject_ids.append(subject_id)
+                                labels.append(label)
+                                logger.info(f"  Loaded {pt_file.name} using key '{key}'")
+                                break
+
+            except Exception as e:
+                logger.warning(f"  Failed to load {pt_file}: {e}")
+                continue
+
+            if max_subjects and len(set(subject_ids)) >= max_subjects:
+                break
+
+        if phase_data_list:
+            return phase_data_list, subject_ids, labels
+
+    # Fallback: Try original format with .fif files
     for condition_dir in ["HC", "HID", "MCI", "AD"]:
         condition_path = data_dir / condition_dir
         if not condition_path.exists():
@@ -485,8 +563,7 @@ def load_cached_subjects(
 
             if cache_path.exists():
                 cached = torch.load(cache_path, weights_only=False)
-                # Each cached file has multiple chunks
-                chunks = cached["chunks"]  # List of (n_features, n_samples)
+                chunks = cached["chunks"]
 
                 for chunk in chunks:
                     phase_data_list.append(chunk.numpy() if isinstance(chunk, torch.Tensor) else chunk)
