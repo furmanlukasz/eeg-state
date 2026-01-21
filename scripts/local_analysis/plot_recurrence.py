@@ -19,7 +19,9 @@ Usage:
 
 import argparse
 import sys
+import json
 from pathlib import Path
+from datetime import datetime
 
 import numpy as np
 import matplotlib.pyplot as plt
@@ -35,6 +37,33 @@ from config import (
 )
 from load_model import load_model_from_checkpoint, create_model, compute_latent_trajectory
 from load_data import load_and_preprocess_fif
+
+
+def create_timestamped_output_dir(base_dir: Path, script_name: str) -> Path:
+    """Create a timestamped output directory for versioned results."""
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    output_dir = base_dir / f"{script_name}_{timestamp}"
+    output_dir.mkdir(parents=True, exist_ok=True)
+    return output_dir
+
+
+def save_parameters(output_dir: Path, params: dict):
+    """Save parameters to a JSON file for reproducibility."""
+    params_path = output_dir / "parameters.json"
+
+    # Convert Path objects to strings
+    serializable_params = {}
+    for k, v in params.items():
+        if isinstance(v, Path):
+            serializable_params[k] = str(v)
+        else:
+            serializable_params[k] = v
+
+    serializable_params["timestamp"] = datetime.now().isoformat()
+
+    with open(params_path, 'w') as f:
+        json.dump(serializable_params, f, indent=2)
+    print(f"Parameters saved to: {params_path}")
 
 
 def compute_angular_distance_matrix(latent_trajectory: np.ndarray) -> np.ndarray:
@@ -383,7 +412,27 @@ Examples:
             print(f"Error: --chunk must be an integer or 'all', got '{args.chunk}'")
             return 1
 
-    output_dir = ensure_output_dir()
+    # Create timestamped output directory
+    base_output_dir = ensure_output_dir()
+    output_dir = create_timestamped_output_dir(base_output_dir, "plot_recurrence")
+    print(f"Output directory: {output_dir}")
+
+    # Save parameters for reproducibility
+    save_parameters(output_dir, {
+        "n_subjects": args.n_subjects,
+        "subject": args.subject,
+        "conditions": args.conditions,
+        "chunk": args.chunk,
+        "theiler": theiler_window,
+        "rr_targets": RR_TARGETS,
+        "filter_low": FILTER_LOW,
+        "filter_high": FILTER_HIGH,
+        "chunk_duration": CHUNK_DURATION,
+        "sfreq": SFREQ,
+        "checkpoint_path": CHECKPOINT_PATH,
+        "data_dir": DATA_DIR,
+        "device": DEVICE,
+    })
 
     # Get files first (before loading model for list commands)
     fif_files = get_fif_files(args.conditions)

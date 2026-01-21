@@ -19,7 +19,9 @@ Usage:
 """
 
 import argparse
+import json
 import sys
+from datetime import datetime
 from pathlib import Path
 
 import numpy as np
@@ -51,6 +53,33 @@ GROUP_NAMES = {
     1: "MCI",
     2: "AD",
 }
+
+
+def create_timestamped_output_dir(base_dir: Path, script_name: str) -> Path:
+    """Create a timestamped output directory for versioned results."""
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    output_dir = base_dir / f"{script_name}_{timestamp}"
+    output_dir.mkdir(parents=True, exist_ok=True)
+    return output_dir
+
+
+def save_parameters(output_dir: Path, params: dict):
+    """Save parameters to a JSON file for reproducibility."""
+    params_path = output_dir / "parameters.json"
+
+    # Convert Path objects to strings
+    serializable_params = {}
+    for k, v in params.items():
+        if isinstance(v, Path):
+            serializable_params[k] = str(v)
+        else:
+            serializable_params[k] = v
+
+    serializable_params["timestamp"] = datetime.now().isoformat()
+
+    with open(params_path, 'w') as f:
+        json.dump(serializable_params, f, indent=2)
+    print(f"Parameters saved to: {params_path}")
 
 
 def collect_latents_for_groups(
@@ -464,9 +493,17 @@ Note: 'trajectory' mode projects all timepoints (1000s of points) and is slow.
                         help="List available subjects and exit")
     parser.add_argument("--no-show", action="store_true",
                         help="Don't display plots interactively")
+    parser.add_argument("--output-dir", type=str, default=None,
+                        help="Custom output directory (default: timestamped folder)")
     args = parser.parse_args()
 
-    output_dir = ensure_output_dir()
+    # Create timestamped output directory
+    base_output_dir = ensure_output_dir()
+    if args.output_dir:
+        output_dir = Path(args.output_dir)
+        output_dir.mkdir(parents=True, exist_ok=True)
+    else:
+        output_dir = create_timestamped_output_dir(base_output_dir, "plot_umap_3d")
 
     # Get subjects by group for selected conditions
     fif_files = get_fif_files(args.conditions)
@@ -490,6 +527,24 @@ Note: 'trajectory' mode projects all timepoints (1000s of points) and is slow.
         print("Need at least 2 groups with subjects for comparison!")
         print("Available groups:", list(active_groups.keys()))
         return 1
+
+    # Save parameters
+    params = {
+        "n_subjects": args.n_subjects,
+        "n_chunks": args.n_chunks,
+        "conditions": args.conditions,
+        "mode": args.mode,
+        "checkpoint_path": str(CHECKPOINT_PATH),
+        "filter_low": FILTER_LOW,
+        "filter_high": FILTER_HIGH,
+        "chunk_duration": CHUNK_DURATION,
+        "sfreq": SFREQ,
+        "umap_n_neighbors": UMAP_N_NEIGHBORS,
+        "umap_min_dist": UMAP_MIN_DIST,
+        "umap_n_components": UMAP_N_COMPONENTS,
+        "groups_found": {k: len(v) for k, v in active_groups.items()},
+    }
+    save_parameters(output_dir, params)
 
     # Load model
     print("\nLoading model...")

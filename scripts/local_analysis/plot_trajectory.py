@@ -25,7 +25,9 @@ Usage:
 
 import argparse
 import sys
+import json
 from pathlib import Path
+from datetime import datetime
 
 import numpy as np
 import matplotlib.pyplot as plt
@@ -48,6 +50,33 @@ from load_data import load_and_preprocess_fif
 # Color mapping
 GROUP_COLORS = {0: "blue", 1: "orange", 2: "red"}
 GROUP_NAMES = {0: "HC", 1: "MCI", 2: "AD"}
+
+
+def create_timestamped_output_dir(base_dir: Path, script_name: str) -> Path:
+    """Create a timestamped output directory for versioned results."""
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    output_dir = base_dir / f"{script_name}_{timestamp}"
+    output_dir.mkdir(parents=True, exist_ok=True)
+    return output_dir
+
+
+def save_parameters(output_dir: Path, params: dict):
+    """Save parameters to a JSON file for reproducibility."""
+    params_path = output_dir / "parameters.json"
+
+    # Convert Path objects to strings
+    serializable_params = {}
+    for k, v in params.items():
+        if isinstance(v, Path):
+            serializable_params[k] = str(v)
+        else:
+            serializable_params[k] = v
+
+    serializable_params["timestamp"] = datetime.now().isoformat()
+
+    with open(params_path, 'w') as f:
+        json.dump(serializable_params, f, indent=2)
+    print(f"Parameters saved to: {params_path}")
 
 
 def extract_continuous_latent(
@@ -357,21 +386,23 @@ def plot_density_heatmap(
     H = gaussian_filter(H.T, sigma=1)  # Smooth
 
     extent = [xedges[0], xedges[-1], yedges[0], yedges[-1]]
-    im = ax.imshow(H, origin='lower', extent=extent, cmap='hot', aspect='auto')
-    plt.colorbar(im, ax=ax, label='Density (time spent)')
+    im = ax.imshow(H, origin='lower', extent=extent, cmap='hot', aspect='equal')
+    plt.colorbar(im, ax=ax, label='Density (time spent)', shrink=0.8)
 
     ax.set_xlabel(f'PC1 ({pca.explained_variance_ratio_[0]*100:.1f}%)')
     ax.set_ylabel(f'PC2 ({pca.explained_variance_ratio_[1]*100:.1f}%)')
     ax.set_title('Density heatmap\n(where system spends time)', fontsize=12)
+    ax.set_aspect('equal')
 
     # Right: Density + trajectory overlay
     ax = axes[1]
-    im = ax.imshow(H, origin='lower', extent=extent, cmap='hot', aspect='auto', alpha=0.7)
+    im = ax.imshow(H, origin='lower', extent=extent, cmap='hot', aspect='equal', alpha=0.7)
     ax.plot(latent_2d[:, 0], latent_2d[:, 1], 'cyan', alpha=0.4, linewidth=0.3)
 
     ax.set_xlabel(f'PC1 ({pca.explained_variance_ratio_[0]*100:.1f}%)')
     ax.set_ylabel(f'PC2 ({pca.explained_variance_ratio_[1]*100:.1f}%)')
     ax.set_title('Density + trajectory overlay', fontsize=12)
+    ax.set_aspect('equal')
 
     plt.suptitle(f'Density Analysis (Dwell Time Distribution){title_suffix}', fontsize=14, fontweight='bold')
     plt.tight_layout()
@@ -448,6 +479,7 @@ def plot_flow_field(
     ax.set_title('Flow field (local displacement vectors)', fontsize=12)
     ax.set_xlim(x_min, x_max)
     ax.set_ylim(y_min, y_max)
+    ax.set_aspect('equal')
 
     # Right: Flow field + trajectory
     ax = axes[1]
@@ -458,6 +490,7 @@ def plot_flow_field(
     ax.set_title('Flow field + trajectory overlay', fontsize=12)
     ax.set_xlim(x_min, x_max)
     ax.set_ylim(y_min, y_max)
+    ax.set_aspect('equal')
 
     plt.suptitle(f'Empirical Flow Field (Rabinovich-style){title_suffix}', fontsize=14, fontweight='bold')
     plt.tight_layout()
@@ -694,9 +727,17 @@ Examples:
                         help="List available subjects and exit")
     parser.add_argument("--no-show", action="store_true",
                         help="Don't display plots interactively")
+    parser.add_argument("--output-dir", type=str, default=None,
+                        help="Custom output directory (default: timestamped folder)")
     args = parser.parse_args()
 
-    output_dir = ensure_output_dir()
+    # Create timestamped output directory
+    base_output_dir = ensure_output_dir()
+    if args.output_dir:
+        output_dir = Path(args.output_dir)
+        output_dir.mkdir(parents=True, exist_ok=True)
+    else:
+        output_dir = create_timestamped_output_dir(base_output_dir, "plot_trajectory")
 
     # Get subjects
     fif_files = get_fif_files(args.conditions)
@@ -741,6 +782,23 @@ Examples:
     group_name = GROUP_NAMES.get(label, "Unknown")
 
     print(f"\nSelected subject: {subject_id} ({condition}, {group_name})")
+
+    # Save parameters
+    params = {
+        "subject": subject_id,
+        "n_chunks": args.n_chunks,
+        "conditions": args.conditions,
+        "mode": args.mode,
+        "compare_random": args.compare_random,
+        "group": group_name,
+        "fif_path": str(fif_path),
+        "checkpoint_path": str(CHECKPOINT_PATH),
+        "filter_low": FILTER_LOW,
+        "filter_high": FILTER_HIGH,
+        "chunk_duration": CHUNK_DURATION,
+        "sfreq": SFREQ,
+    }
+    save_parameters(output_dir, params)
 
     # Load model
     print("\nLoading model...")

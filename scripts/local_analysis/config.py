@@ -14,8 +14,17 @@ from pathlib import Path
 CHECKPOINT_PATH = Path("/Users/luki/Documents/GitHub/eeg-state-biomarkers/models/best2.pt")
 
 # Data directories - point to your local .fif files
-# Structure expected: DATA_DIR/{AD,MCI,HID,HC}/*.fif
-DATA_DIR = Path("/Users/luki/Documents/GitHub/MatrixAutoEncoder/data")
+# Full dataset on mounted NVMe drive
+DATA_DIR = Path("/Volumes/Nvme_Data/GreekData")
+
+# Subdirectory mapping for different conditions
+# AD -> AD-RAW/FILT, MCI -> MCI-RAW/FILT, HC/HID -> HC-RAW/FILT
+CONDITION_SUBDIRS = {
+    "AD": "AD-RAW/FILT",
+    "MCI": "MCI-RAW/FILT",
+    "HID": "HC-RAW/FILT",
+    "HC": "HC-RAW/FILT",
+}
 
 # Output directory for plots
 OUTPUT_DIR = Path("/Users/luki/Documents/GitHub/eeg-state-biomarkers/results/local_analysis")
@@ -28,8 +37,10 @@ OUTPUT_DIR = Path("/Users/luki/Documents/GitHub/eeg-state-biomarkers/results/loc
 SFREQ = 250.0
 
 # Filter settings for phase extraction
+# Default: 1-120Hz (broadband including high gamma)
+# Note: High frequencies (>40Hz) may contain EMG artifacts in frontal/temporal channels
 FILTER_LOW = 1.0
-FILTER_HIGH = 30.0
+FILTER_HIGH = 120.0
 
 # Chunk duration in seconds
 CHUNK_DURATION = 5.0
@@ -69,33 +80,63 @@ def get_fif_files(conditions=None):
         Labels: HC/HID=0, MCI=1, AD=2
     """
     if conditions is None:
-        conditions = ["AD", "MCI", "HID", "HC"]
+        conditions = ["AD", "MCI", "HID"]
 
     # Patterns to exclude (inverse solutions, processed files, etc.)
-    exclude_patterns = ["-inv.fif", "-ave.fif", "-cov.fif", "-fwd.fif", "-src.fif"]
+    # These are source-space reconstructions, not raw EEG
+    exclude_patterns = [
+        "-inv.fif",      # Inverse solution
+        "-v-inv.fif",    # Vector inverse solution
+        "-ave.fif",      # Averaged evoked
+        "-cov.fif",      # Covariance matrix
+        "-fwd.fif",      # Forward solution
+        "-src.fif",      # Source space
+        "-trans.fif",    # Transformation matrix
+    ]
 
     # Label mapping: HC/HID=0 (healthy), MCI=1, AD=2
     label_map = {"HC": 0, "HID": 0, "MCI": 1, "AD": 2}
 
     files = []
     for condition in conditions:
-        condition_dir = DATA_DIR / condition
+        # Use condition-specific subdirectory
+        subdir = CONDITION_SUBDIRS.get(condition, condition)
+        condition_dir = DATA_DIR / subdir
+
         if condition_dir.exists():
             label = label_map.get(condition, 1)  # Default to 1 if unknown
             for fif_file in sorted(condition_dir.glob("**/*.fif")):
-                # Skip non-raw files
+                # Skip non-raw files (inverse solutions, etc.)
                 filename = fif_file.name.lower()
                 if any(pattern in filename for pattern in exclude_patterns):
                     continue
-                files.append((fif_file, label, condition))
+                # Only include files with "_eeg.fif" suffix (raw EEG)
+                if "_eeg.fif" in filename:
+                    files.append((fif_file, label, condition))
+        else:
+            print(f"Warning: Directory not found: {condition_dir}")
 
     return files
 
 
 def get_subject_id(fif_path):
-    """Extract subject ID from file path."""
-    # Format: .../condition/subject_folder/subject_file.fif
-    return fif_path.parent.name.split()[0]
+    """
+    Extract subject ID from file path.
+
+    Examples:
+        .../i002 20150109 1027.fil/i002 20150109 1027.fil_good_1_eeg.fif -> i002
+        .../I040_20150702_1203/I040_20150702_1203_good_1_eeg.fif -> I040
+        .../S017 20140124 0857.fil/S017 20140124 0857.fil_good_1_eeg.fif -> S017
+    """
+    # Get the parent folder name (subject folder)
+    folder_name = fif_path.parent.name
+    # Extract first part (subject ID) - split on space or underscore
+    if " " in folder_name:
+        return folder_name.split()[0]
+    elif "_" in folder_name:
+        return folder_name.split("_")[0]
+    else:
+        return folder_name
 
 
 def get_unique_subjects(fif_files: list) -> dict:

@@ -289,6 +289,87 @@ python scripts/local_analysis/multi_embedding.py --list-subjects
 - Delay embedding (Takens) reconstructs attractor structure
 - Cross-method agreement validates that findings are not embedding artifacts
 
+### 7. Full-Dataset Statistical Analysis (Publication-Ready)
+```bash
+# Fast analysis (pca, tpca, delay) - default, recommended
+python scripts/local_analysis/full_dataset_analysis.py
+
+# Run without showing plots (saves automatically)
+python scripts/local_analysis/full_dataset_analysis.py --no-show
+
+# Quick test mode (100 bootstrap, 5 subjects per group)
+python scripts/local_analysis/full_dataset_analysis.py --quick --no-show
+
+# Include slow methods (diffusion maps, UMAP) - takes much longer
+python scripts/local_analysis/full_dataset_analysis.py --embedding all
+
+# Single embedding method
+python scripts/local_analysis/full_dataset_analysis.py --embedding pca
+
+# Custom bootstrap iterations
+python scripts/local_analysis/full_dataset_analysis.py --n-bootstrap 1000
+
+# More chunks per subject for longer trajectories
+python scripts/local_analysis/full_dataset_analysis.py --n-chunks 15
+```
+
+**Embedding options:**
+| Option | Methods | Speed |
+|--------|---------|-------|
+| `--embedding fast` (default) | PCA, tPCA, Delay | Fast |
+| `--embedding all` | PCA, tPCA, Delay, Diffusion, UMAP | Slow |
+| `--embedding pca` | PCA only | Fastest |
+
+**Purpose:**
+This script provides publication-ready statistical analysis for a systems neuroscience paper. It focuses on **quantifying robust reorganization of metastable brain dynamics** across groups, NOT classification or biomarkers.
+
+**Key features:**
+1. **Subject-level bootstrapping** (500+ iterations) for confidence intervals
+2. **Density difference maps with statistical masking** (95% CI excludes 0)
+3. **Radial density and speed profiles** with bootstrap CIs
+4. **Effect sizes (Cohen's d)** with bootstrap CIs
+5. **Cross-embedding robustness** quantification
+6. **Group flow fields (Rabinovich-style)** with density overlay
+7. **Flow field differences** with divergence analysis
+
+**Outputs:**
+- `bootstrap_metrics_*.png` - Flow metrics with 95% CIs per group
+- `density_diff_ci_*.png` - Density difference maps with significance masking
+- `radial_profiles_*.png` - Radial density/speed profiles with CIs
+- `group_flow_fields_*.png` - Rabinovich-style flow fields per group
+- `flow_difference_*.png` - Flow field differences (MCI-HC, AD-HC)
+- `effect_sizes.png` - Cohen's d effect sizes with interpretation
+- `cross_embedding_robustness.png` - Consistency heatmaps across embeddings
+- `full_analysis_results.json` - All results in machine-readable format
+- `summary_table.txt` - Human-readable summary table
+
+**Statistical approach:**
+| Analysis | Method | Output |
+|----------|--------|--------|
+| Flow metrics | Subject-level bootstrap (n=500) | Mean ± 95% CI |
+| Density differences | Per-pixel bootstrap | Masked difference maps |
+| Radial profiles | Subject-level bootstrap | Profile curves with CI bands |
+| Group flow fields | Aggregate displacement vectors | Quiver plots + magnitude maps |
+| Flow differences | Vector subtraction | Direction/magnitude/divergence maps |
+| Effect sizes | Bootstrap Cohen's d | d ± 95% CI with interpretation |
+| Cross-embedding | Spearman correlations | Mean off-diagonal ρ |
+
+**Effect size interpretation:**
+| |d| | Interpretation |
+|-----|----------------|
+| < 0.2 | Negligible |
+| 0.2 - 0.5 | Small |
+| 0.5 - 0.8 | Medium |
+| > 0.8 | Large |
+
+**Theoretical framing:**
+This analysis is about *dynamics*, not labels:
+- Disease labels are grouping variables, not prediction targets
+- The contribution is methodological + conceptual
+- Shows that entropy is preserved, flow geometry changes, metastability reorganizes
+- Effects are consistent across embeddings (embedding-invariant)
+- Effects persist under resampling (bootstrap-robust)
+
 ## Output
 
 All plots are saved to:
@@ -300,16 +381,17 @@ All plots are saved to:
 
 ```
 scripts/local_analysis/
-├── config.py           # Edit paths here
-├── load_model.py       # Model loading utilities
-├── load_data.py        # Data loading and preprocessing
-├── plot_recurrence.py  # Recurrence matrix visualization
-├── plot_umap_3d.py     # 3D UMAP visualization
-├── plot_trajectory.py  # Rabinovich-style trajectory visualization
-├── compare_hc_mci.py   # Group comparison with violin plots
-├── classify_rqa.py     # RQA-based classification with ROC curves
-├── multi_embedding.py  # Multi-embedding trajectory analysis
-└── README.md           # This file
+├── config.py                 # Edit paths here
+├── load_model.py             # Model loading utilities
+├── load_data.py              # Data loading and preprocessing
+├── plot_recurrence.py        # Recurrence matrix visualization
+├── plot_umap_3d.py           # 3D UMAP visualization
+├── plot_trajectory.py        # Rabinovich-style trajectory visualization
+├── compare_hc_mci.py         # Group comparison with violin plots
+├── classify_rqa.py           # RQA-based classification with ROC curves
+├── multi_embedding.py        # Multi-embedding trajectory analysis
+├── full_dataset_analysis.py  # Publication-ready statistical analysis
+└── README.md                 # This file
 ```
 
 ## Notes

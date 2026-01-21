@@ -23,8 +23,10 @@ Usage:
 
 import argparse
 import sys
+import json
 from pathlib import Path
 from dataclasses import dataclass
+from datetime import datetime
 
 import numpy as np
 import matplotlib.pyplot as plt
@@ -55,6 +57,33 @@ except ImportError:
 
 GROUP_COLORS = {0: "blue", 1: "orange", 2: "red"}
 GROUP_NAMES = {0: "HC", 1: "MCI", 2: "AD"}
+
+
+def create_timestamped_output_dir(base_dir: Path, script_name: str) -> Path:
+    """Create a timestamped output directory for versioned results."""
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    output_dir = base_dir / f"{script_name}_{timestamp}"
+    output_dir.mkdir(parents=True, exist_ok=True)
+    return output_dir
+
+
+def save_parameters(output_dir: Path, params: dict):
+    """Save parameters to a JSON file for reproducibility."""
+    params_path = output_dir / "parameters.json"
+
+    # Convert Path objects to strings
+    serializable_params = {}
+    for k, v in params.items():
+        if isinstance(v, Path):
+            serializable_params[k] = str(v)
+        else:
+            serializable_params[k] = v
+
+    serializable_params["timestamp"] = datetime.now().isoformat()
+
+    with open(params_path, 'w') as f:
+        json.dump(serializable_params, f, indent=2)
+    print(f"Parameters saved to: {params_path}")
 
 
 @dataclass
@@ -426,7 +455,7 @@ def plot_density_overlay(embedded: np.ndarray, ax: plt.Axes, bins: int = 30):
     H = gaussian_filter(H.T, sigma=1)
 
     extent = [xedges[0], xedges[-1], yedges[0], yedges[-1]]
-    ax.imshow(H, origin='lower', extent=extent, cmap='hot', aspect='auto', alpha=0.6)
+    ax.imshow(H, origin='lower', extent=extent, cmap='hot', aspect='equal', alpha=0.6)
 
 
 def plot_multi_embedding_comparison(
@@ -1164,12 +1193,13 @@ def compare_all_groups(
             )
 
             im = ax.imshow(density, origin='lower', extent=extent,
-                          cmap='hot', aspect='auto')
+                          cmap='hot', aspect='equal')
             ax.set_title(f"{group_name} Mean Density\n(n={len(group_densities[group_key])})",
                         fontweight='bold')
             ax.set_xlabel("PC1" if "pca" in method else "Dim 1")
             ax.set_ylabel("PC2" if "pca" in method else "Dim 2")
-            plt.colorbar(im, ax=ax, label='Probability')
+            ax.set_aspect('equal')
+            plt.colorbar(im, ax=ax, label='Probability', shrink=0.8)
 
         # Hide unused axes in row 1
         for col in range(n_groups, axes.shape[1]):
@@ -1194,11 +1224,12 @@ def compare_all_groups(
                 # Symmetric colormap for differences
                 vmax = np.abs(diff).max()
                 im = ax.imshow(diff, origin='lower', extent=extent,
-                              cmap='RdBu_r', vmin=-vmax, vmax=vmax, aspect='auto')
+                              cmap='RdBu_r', vmin=-vmax, vmax=vmax, aspect='equal')
                 ax.set_title(f"{group_name} − HC\n(Difference Map)", fontweight='bold')
                 ax.set_xlabel("PC1" if "pca" in method else "Dim 1")
                 ax.set_ylabel("PC2" if "pca" in method else "Dim 2")
-                cbar = plt.colorbar(im, ax=ax)
+                ax.set_aspect('equal')
+                cbar = plt.colorbar(im, ax=ax, shrink=0.8)
                 cbar.set_label('Δ Probability')
 
                 diff_idx += 1
@@ -1289,7 +1320,7 @@ def compare_all_groups(
         ax.set_ylabel(label)
         ax.set_title(label, fontweight='bold')
         ax.set_xticks(x_positions + width)
-        ax.set_xticklabels([m.upper() for m in methods], rotation=45, ha='right')
+        ax.set_xticklabels([m.upper() for m in methods])
         if idx == 0:
             ax.legend()
 
@@ -1382,7 +1413,30 @@ Embedding methods:
                         help="Don't display plots interactively")
     args = parser.parse_args()
 
-    output_dir = ensure_output_dir()
+    # Create timestamped output directory
+    base_output_dir = ensure_output_dir()
+    output_dir = create_timestamped_output_dir(base_output_dir, "multi_embedding")
+    print(f"Output directory: {output_dir}")
+
+    # Save parameters for reproducibility
+    save_parameters(output_dir, {
+        "subject": args.subject,
+        "n_chunks": args.n_chunks,
+        "n_subjects": args.n_subjects,
+        "conditions": args.conditions,
+        "embedding": args.embedding,
+        "tau": args.tau,
+        "delay_dim": args.delay_dim,
+        "compare_groups": args.compare_groups,
+        "compare_all": args.compare_all,
+        "filter_low": FILTER_LOW,
+        "filter_high": FILTER_HIGH,
+        "chunk_duration": CHUNK_DURATION,
+        "sfreq": SFREQ,
+        "checkpoint_path": CHECKPOINT_PATH,
+        "data_dir": DATA_DIR,
+        "device": DEVICE,
+    })
 
     # Get subjects
     fif_files = get_fif_files(args.conditions)
