@@ -1,0 +1,51 @@
+# Meditation/Mind-wandering BIDS Dataset (ds001787)
+# Expert vs Novice meditators - OpenNeuro
+#
+# Usage:
+#   python -m eeg_biomarkers.training.train data=meditation_bids paths.data_dir=/path/to/ds001787
+
+dataset: "meditation_bids"
+
+# Groups determined from participants.tsv
+groups:
+  - name: "expert"
+    label: 0
+    path: "."
+  - name: "novice"
+    label: 1
+    path: "."
+
+# Preprocessing (based on original paper methodology)
+preprocessing:
+  # Filtering - paper used 2 Hz high-pass
+  filter_low: 2.0
+  filter_high: 48.0
+  notch_freq: 50.0  # EU line frequency
+
+  # Referencing
+  reference: "average"
+
+  # Chunking - paper used 10s epochs before probes
+  # For continuous analysis, we can use 5s chunks
+  chunk_duration: 5.0
+  chunk_overlap: 0.0
+
+  # Phase extraction
+  phase_method: "hilbert"
+
+# Sampling
+sampling:
+  n_subjects_per_group: null  # null = use all 12 per group
+  random_seed: 42
+
+# Splitting
+splitting:
+  method: "group_kfold"
+  n_splits: 5
+  test_size: 0.2
+  group_by: "subject"
+
+# Caching
+caching:
+  enabled: true
+  cache_dir: "preprocessed_data"

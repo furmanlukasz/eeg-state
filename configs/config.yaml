@@ -31,7 +31,8 @@ logging:
 # Hydra configuration
 hydra:
   run:
-    dir: outputs/${experiment.name}/${now:%Y-%m-%d_%H-%M-%S}
+    # Output structure: outputs/{experiment}/{dataset}/{timestamp}/
+    dir: outputs/${experiment.name}/${data.dataset}/${now:%Y-%m-%d_%H-%M-%S}
   sweep:
-    dir: outputs/${experiment.name}/multirun/${now:%Y-%m-%d_%H-%M-%S}
+    dir: outputs/${experiment.name}/${data.dataset}/multirun/${now:%Y-%m-%d_%H-%M-%S}
     subdir: ${hydra.job.num}

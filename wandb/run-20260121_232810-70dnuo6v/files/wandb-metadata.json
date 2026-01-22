@@ -1,0 +1,20 @@
+{
+  "os": "macOS-15.6.1-arm64-arm-64bit",
+  "python": "CPython 3.11.14",
+  "startedAt": "2026-01-21T22:28:10.446843Z",
+  "args": [
+    "data=meditation_bids",
+    "model=transformer",
+    "training.epochs=300"
+  ],
+  "program": "-m eeg_biomarkers.training.train",
+  "git": {
+    "remote": "https://github.com/furmanlukasz/eeg-state.git",
+    "commit": "0c57b328c46cbd01341c743ccabb2b059737f33e"
+  },
+  "email": "cracer.net@gmail.com",
+  "root": "/Users/luki/Documents/GitHub/eeg-state-biomarkers",
+  "host": "MacBook-Pro-lukas-5.local",
+  "executable": "/Users/luki/Documents/GitHub/eeg-state-biomarkers/.venv/bin/python3",
+  "writerId": "w9sfosx5wbv7hxgnqr1nbyx63dmbodgw"
+}

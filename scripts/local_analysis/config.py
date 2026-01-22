@@ -2,9 +2,21 @@
 Local Analysis Configuration
 
 Edit these paths to match your local setup.
+Supports multiple datasets through DatasetConfig system.
 """
 
 from pathlib import Path
+import sys
+
+# Add src to path for imports
+sys.path.insert(0, str(Path(__file__).parent.parent.parent / "src"))
+
+# =============================================================================
+# DATASET SELECTION - Choose which dataset to use
+# =============================================================================
+
+# Available datasets: "greek_resting", "meditation_bids"
+DATASET = "greek_resting"
 
 # =============================================================================
 # PATHS - Edit these to match your local setup
@@ -13,11 +25,16 @@ from pathlib import Path
 # Model checkpoint (from MatrixAutoEncoder repo or RunPod)
 CHECKPOINT_PATH = Path("/Users/luki/Documents/GitHub/eeg-state-biomarkers/models/best2.pt")
 
-# Data directories - point to your local .fif files
-# Full dataset on mounted NVMe drive
-DATA_DIR = Path("/Volumes/Nvme_Data/GreekData")
+# Data directories for different datasets
+DATA_PATHS = {
+    "greek_resting": Path("/Volumes/Nvme_Data/GreekData"),
+    "meditation_bids": Path("/Volumes/Nvme_Data/ds001787"),
+}
 
-# Subdirectory mapping for different conditions
+# Legacy support: DATA_DIR for backwards compatibility
+DATA_DIR = DATA_PATHS.get(DATASET, DATA_PATHS["greek_resting"])
+
+# Subdirectory mapping for different conditions (Greek dataset only)
 # AD -> AD-RAW/FILT, MCI -> MCI-RAW/FILT, HC/HID -> HC-RAW/FILT
 CONDITION_SUBDIRS = {
     "AD": "AD-RAW/FILT",
@@ -192,3 +209,71 @@ def get_subjects_by_group(fif_files: list) -> dict:
 def get_label_name(label: int) -> str:
     """Get human-readable name for label."""
     return {0: "HC", 1: "MCI", 2: "AD"}.get(label, "Unknown")
+
+
+# =============================================================================
+# DATASET CONFIG INTEGRATION
+# =============================================================================
+
+def get_dataset_config():
+    """
+    Get the DatasetConfig for the currently selected dataset.
+
+    Returns:
+        DatasetConfig instance for the current dataset
+    """
+    try:
+        from eeg_biomarkers.data.dataset_config import get_dataset_config as _get_config
+        return _get_config(DATASET)
+    except ImportError:
+        print("Warning: eeg_biomarkers not installed. Using legacy config.")
+        return None
+
+
+def get_data_files_via_config(groups=None):
+    """
+    Get data files using the DatasetConfig system.
+
+    This is the preferred method for multi-dataset support.
+
+    Args:
+        groups: List of group names to include (e.g., ["HC", "MCI"])
+                If None, includes all groups in the dataset config.
+
+    Returns:
+        List of (file_path, label, group_name) tuples
+    """
+    config = get_dataset_config()
+    if config is None:
+        # Fallback to legacy method
+        return get_fif_files(groups)
+
+    data_dir = DATA_PATHS.get(DATASET, DATA_DIR)
+
+    files = []
+    for group in config.groups:
+        if groups is not None and group.name not in groups:
+            continue
+
+        group_files = config.get_files_for_group(data_dir, group)
+        for file_path in group_files:
+            files.append((file_path, group.label, group.name))
+
+    return files
+
+
+def get_subject_id_via_config(file_path: Path) -> str:
+    """
+    Extract subject ID using the DatasetConfig system.
+
+    Args:
+        file_path: Path to data file
+
+    Returns:
+        Subject ID string
+    """
+    config = get_dataset_config()
+    if config is None:
+        return get_subject_id(file_path)
+
+    return config.get_subject_id(file_path)

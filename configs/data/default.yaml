@@ -1,5 +1,13 @@
 # Data configuration
 # EEG preprocessing and loading settings
+#
+# This is the default configuration. For dataset-specific configs, use:
+#   - data=greek_resting   (Greek HD-EEG: HC/MCI/AD)
+#   - data=meditation_bids (OpenNeuro ds001787: expert/novice)
+
+# Dataset type - determines file discovery and loading logic
+# Options: "greek_resting", "meditation_bids", or custom
+dataset: "greek_resting"
 
 # Data paths (relative to paths.data_dir)
 groups:

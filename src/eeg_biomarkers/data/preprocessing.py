@@ -10,30 +10,33 @@ import mne
 from scipy.signal import hilbert
 
 
-def load_eeg_file(
-    filepath: str | Path,
+def preprocess_raw(
+    raw: mne.io.Raw,
     filter_low: float = 3.0,
     filter_high: float = 48.0,
     reference: Literal["csd", "average"] = "csd",
     notch_freq: float | None = None,
+    resample_freq: float | None = None,
     verbose: bool = False,
 ) -> mne.io.Raw:
     """
-    Load and preprocess an EEG file.
+    Preprocess an already-loaded MNE Raw object.
 
     Args:
-        filepath: Path to .fif file
+        raw: MNE Raw object (already loaded with preload=True)
         filter_low: Low cutoff frequency (Hz)
         filter_high: High cutoff frequency (Hz)
         reference: Referencing method ("csd" or "average")
         notch_freq: Notch filter frequency for line noise (50/60 Hz), or None
+        resample_freq: Target sampling rate, or None to keep original
         verbose: Whether to print MNE output
 
     Returns:
         Preprocessed Raw object
     """
-    # Load raw data
-    raw = mne.io.read_raw_fif(filepath, preload=True, verbose=verbose)
+    # Resample if requested (do this first to speed up filtering)
+    if resample_freq is not None and raw.info["sfreq"] != resample_freq:
+        raw.resample(resample_freq, verbose=verbose)
 
     # Apply notch filter if specified
     if notch_freq is not None:
@@ -49,6 +52,44 @@ def load_eeg_file(
         raw.set_eeg_reference("average", verbose=verbose)
 
     return raw
+
+
+def load_eeg_file(
+    filepath: str | Path,
+    filter_low: float = 3.0,
+    filter_high: float = 48.0,
+    reference: Literal["csd", "average"] = "csd",
+    notch_freq: float | None = None,
+    verbose: bool = False,
+) -> mne.io.Raw:
+    """
+    Load and preprocess an EEG file (FIF format).
+
+    This is a convenience function for loading .fif files. For other formats
+    or more control, use preprocess_raw() directly.
+
+    Args:
+        filepath: Path to .fif file
+        filter_low: Low cutoff frequency (Hz)
+        filter_high: High cutoff frequency (Hz)
+        reference: Referencing method ("csd" or "average")
+        notch_freq: Notch filter frequency for line noise (50/60 Hz), or None
+        verbose: Whether to print MNE output
+
+    Returns:
+        Preprocessed Raw object
+    """
+    # Load raw data
+    raw = mne.io.read_raw_fif(filepath, preload=True, verbose=verbose)
+
+    return preprocess_raw(
+        raw,
+        filter_low=filter_low,
+        filter_high=filter_high,
+        reference=reference,
+        notch_freq=notch_freq,
+        verbose=verbose,
+    )
 
 
 def extract_phase_circular(

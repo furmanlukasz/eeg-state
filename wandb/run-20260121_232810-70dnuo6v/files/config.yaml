@@ -1,0 +1,152 @@
+_wandb:
+    value:
+        cli_version: 0.24.0
+        e:
+            w9sfosx5wbv7hxgnqr1nbyx63dmbodgw:
+                args:
+                    - data=meditation_bids
+                    - model=transformer
+                    - training.epochs=300
+                email: cracer.net@gmail.com
+                executable: /Users/luki/Documents/GitHub/eeg-state-biomarkers/.venv/bin/python3
+                git:
+                    commit: 0c57b328c46cbd01341c743ccabb2b059737f33e
+                    remote: https://github.com/furmanlukasz/eeg-state.git
+                host: MacBook-Pro-lukas-5.local
+                os: macOS-15.6.1-arm64-arm-64bit
+                program: -m eeg_biomarkers.training.train
+                python: CPython 3.11.14
+                root: /Users/luki/Documents/GitHub/eeg-state-biomarkers
+                startedAt: "2026-01-21T22:28:10.446843Z"
+                writerId: w9sfosx5wbv7hxgnqr1nbyx63dmbodgw
+        m: []
+        python_version: 3.11.14
+        t:
+            "1":
+                - 1
+                - 5
+                - 50
+                - 53
+            "2":
+                - 1
+                - 5
+                - 50
+                - 53
+            "3":
+                - 13
+                - 16
+            "4": 3.11.14
+            "5": 0.24.0
+            "12": 0.24.0
+            "13": darwin-arm64
+data:
+    value:
+        caching:
+            cache_dir: preprocessed_data
+            enabled: true
+        dataset: meditation_bids
+        groups:
+            - label: 0
+              name: expert
+              path: .
+            - label: 1
+              name: novice
+              path: .
+        preprocessing:
+            chunk_duration: 5
+            chunk_overlap: 0
+            filter_high: 48
+            filter_low: 2
+            notch_freq: 50
+            phase_method: hilbert
+            reference: average
+        sampling:
+            n_subjects_per_group: null
+            random_seed: 42
+        splitting:
+            group_by: subject
+            method: group_kfold
+            n_splits: 5
+            test_size: 0.2
+experiment:
+    value:
+        device: auto
+        name: eeg_mci_biomarkers
+        seed: 42
+logging:
+    value:
+        level: INFO
+        wandb:
+            enabled: true
+            entity: null
+            project: eeg-mci-biomarkers
+model:
+    value:
+        decoder:
+            constrain_output: true
+            use_encoder_config: true
+        encoder:
+            complexity: 2
+            dim_feedforward: 256
+            dropout: 0.1
+            hidden_size: 64
+            n_heads: 4
+            n_transformer_layers: 2
+        name: transformer_autoencoder
+        phase:
+            include_amplitude: true
+            normalize_amplitude: true
+            representation: circular
+        recurrence:
+            fixed_epsilon: null
+            target_rr: 0.02
+            threshold_method: rr_controlled
+paths:
+    value:
+        data_dir: data
+        model_dir: models
+        output_dir: outputs
+        results_dir: results
+training:
+    value:
+        batch_size: 64
+        checkpointing:
+            enabled: true
+            save_best: true
+            save_every_n_epochs: 10
+            save_last: true
+        early_stopping:
+            enabled: true
+            min_delta: 0.001
+            monitor: val_loss
+            patience: 20
+        epochs: 300
+        gradient_accumulation_steps: 1
+        gradient_clip_norm: 1
+        lambda_amplitude: 1
+        lambda_phase: 1
+        lambda_unit_circle: 0.1
+        loss:
+            name: mse
+        optimizer:
+            betas:
+                - 0.9
+                - 0.999
+            lr: 0.001
+            name: adamw
+            weight_decay: 0.01
+        regularization:
+            label_smoothing: 0
+            mixup_alpha: 0
+        scheduler:
+            factor: 0.5
+            gamma: 0.1
+            min_lr: 1e-05
+            name: cosine
+            patience: 10
+            step_size: 30
+            warmup_epochs: 5
+        validation:
+            enabled: true
+            frequency: 1
+            subset_fraction: null

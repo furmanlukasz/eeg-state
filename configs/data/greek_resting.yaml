@@ -1,0 +1,54 @@
+# Greek HD-EEG Resting-state Dataset
+# HC vs MCI vs AD classification
+#
+# Usage:
+#   python -m eeg_biomarkers.training.train data=greek_resting
+
+dataset: "greek_resting"
+
+# Data paths (relative to paths.data_dir)
+groups:
+  - name: "HC"
+    label: 0
+    path: "HC-RAW/FILT"
+  - name: "MCI"
+    label: 1
+    path: "MCI-RAW/FILT"
+  # Uncomment to include AD group:
+  # - name: "AD"
+  #   label: 2
+  #   path: "AD-RAW/FILT"
+
+# Preprocessing
+preprocessing:
+  # Filtering - broadband including high gamma
+  filter_low: 1.0
+  filter_high: 120.0
+  notch_freq: null  # Data already filtered
+
+  # Referencing - CSD for source localization
+  reference: "csd"
+
+  # Chunking
+  chunk_duration: 5.0
+  chunk_overlap: 0.0
+
+  # Phase extraction
+  phase_method: "hilbert"
+
+# Sampling
+sampling:
+  n_subjects_per_group: null  # null = use all subjects
+  random_seed: 42
+
+# Splitting
+splitting:
+  method: "group_kfold"
+  n_splits: 5
+  test_size: 0.2
+  group_by: "subject"
+
+# Caching
+caching:
+  enabled: true
+  cache_dir: "preprocessed_data"

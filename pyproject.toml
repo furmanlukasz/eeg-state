@@ -125,4 +125,5 @@ ignore_missing_imports = true
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 python_files = ["test_*.py"]
+pythonpath = ["src"]
 addopts = "-v --cov=eeg_biomarkers --cov-report=term-missing"
