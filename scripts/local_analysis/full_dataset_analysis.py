@@ -48,12 +48,13 @@ from tqdm import tqdm
 sys.path.insert(0, str(Path(__file__).parent))
 
 from config import (
-    CHECKPOINT_PATH, DATA_DIR, OUTPUT_DIR, DEVICE,
+    CHECKPOINT_PATH, DATA_DIR, OUTPUT_DIR, DEVICE, DATASET,
     FILTER_LOW, FILTER_HIGH, CHUNK_DURATION, SFREQ,
-    ensure_output_dir, get_fif_files, get_subjects_by_group
+    ensure_output_dir, get_fif_files, get_subjects_by_group,
+    get_data_files_via_config, get_subjects_by_group_unified, get_dataset_config
 )
 from load_model import load_model_from_checkpoint, create_model, compute_latent_trajectory
-from load_data import load_and_preprocess_fif
+from load_data import load_and_preprocess_file
 
 # Optional imports
 try:
@@ -62,8 +63,25 @@ try:
 except ImportError:
     HAS_UMAP = False
 
-GROUP_COLORS = {0: "#1f77b4", 1: "#ff7f0e", 2: "#d62728"}  # Blue, Orange, Red
-GROUP_NAMES = {0: "HC", 1: "MCI", 2: "AD"}
+# Dynamic group colors and names based on dataset
+def get_group_config():
+    """Get group colors and names based on current dataset."""
+    if DATASET == "meditation_bids":
+        return {
+            "colors": {"expert": "#1f77b4", "novice": "#ff7f0e"},  # Blue, Orange
+            "names": {0: "expert", 1: "novice"},
+            "keys": ["expert", "novice"],
+        }
+    else:  # greek_resting
+        return {
+            "colors": {"HC": "#1f77b4", "MCI": "#ff7f0e", "AD": "#d62728"},  # Blue, Orange, Red
+            "names": {0: "HC", 1: "MCI", 2: "AD"},
+            "keys": ["hc", "mci", "ad"],
+        }
+
+GROUP_CONFIG = get_group_config()
+GROUP_COLORS = GROUP_CONFIG["colors"]
+GROUP_NAMES = GROUP_CONFIG["names"]
 
 
 def create_timestamped_output_dir(base_dir: Path, script_name: str) -> Path:
@@ -1253,29 +1271,43 @@ def load_all_subjects(
     n_chunks: int,
 ) -> dict[str, list[SubjectData]]:
     """Load all subjects' latent trajectories."""
-    subject_data = {"HC": [], "MCI": [], "AD": []}
+    # Initialize subject_data with dynamic group names
+    group_keys = GROUP_CONFIG["keys"]
+    subject_data = {}
 
-    for group_key in ["hc", "mci", "ad"]:
+    for group_key in group_keys:
         subjects = groups.get(group_key, [])
         if not subjects:
             continue
 
-        group_name = GROUP_NAMES.get(subjects[0][1], group_key.upper())
+        # Get display name (uppercase for consistency in plots)
+        group_name = subjects[0][2] if len(subjects[0]) > 2 else group_key.upper()
+        # Capitalize for display
+        display_name = group_name.upper() if DATASET != "meditation_bids" else group_name.capitalize()
+
+        subject_data[display_name] = []
+
         max_subjects = n_subjects_per_group if n_subjects_per_group else len(subjects)
 
-        print(f"\nLoading {group_name} subjects (max {max_subjects})...")
+        print(f"\nLoading {display_name} subjects (max {max_subjects})...")
         subjects_processed = 0
 
-        for fif_path, label, condition, subject_id in tqdm(subjects, desc=group_name):
+        for entry in tqdm(subjects, desc=display_name):
             if subjects_processed >= max_subjects:
                 break
 
+            file_path, label, condition, subject_id = entry
+
             # Load and extract latent
-            data = load_and_preprocess_fif(
-                fif_path, FILTER_LOW, FILTER_HIGH, CHUNK_DURATION,
-                include_amplitude=model_info["include_amplitude"],
-                verbose=False,
-            )
+            try:
+                data = load_and_preprocess_file(
+                    file_path, FILTER_LOW, FILTER_HIGH, CHUNK_DURATION,
+                    include_amplitude=model_info["include_amplitude"],
+                    verbose=False,
+                )
+            except Exception as e:
+                print(f"  Warning: Failed to load {subject_id}: {e}")
+                continue
 
             if len(data["chunks"]) == 0:
                 continue
@@ -1288,7 +1320,7 @@ def load_all_subjects(
 
             trajectory = np.concatenate(latents, axis=0)
 
-            subject_data[group_name].append(SubjectData(
+            subject_data[display_name].append(SubjectData(
                 subject_id=subject_id,
                 group=group_key,
                 label=label,
@@ -1296,7 +1328,7 @@ def load_all_subjects(
             ))
             subjects_processed += 1
 
-        print(f"  Loaded {subjects_processed} {group_name} subjects")
+        print(f"  Loaded {subjects_processed} {display_name} subjects")
 
     return subject_data
 
@@ -1590,8 +1622,8 @@ def main():
                         help="Chunks per subject (default: 10)")
     parser.add_argument("--n-bootstrap", type=int, default=500,
                         help="Bootstrap iterations (default: 500)")
-    parser.add_argument("--conditions", type=str, nargs="+", default=["HID", "MCI", "AD"],
-                        help="Conditions to include (default: HID MCI AD)")
+    parser.add_argument("--groups", type=str, nargs="+", default=None,
+                        help="Groups to include (default: all groups in dataset)")
     parser.add_argument("--embedding", type=str, default="fast",
                         choices=["pca", "tpca", "diffusion", "delay", "umap", "fast", "all"],
                         help="Embedding method: 'fast' (pca+tpca+delay, default), 'all' (includes slow diffusion/umap), or single method")
@@ -1617,30 +1649,39 @@ def main():
         args.n_subjects = 5
         print("QUICK MODE: 100 bootstrap iterations, 5 subjects per group")
 
+    print(f"\n{'='*80}")
+    print(f"DATASET: {DATASET}")
+    print(f"CHECKPOINT: {CHECKPOINT_PATH}")
+    print(f"{'='*80}")
+
     # Create timestamped output directory
     base_output_dir = ensure_output_dir()
-    output_dir = create_timestamped_output_dir(base_output_dir, "full_dataset_analysis")
+    output_dir = create_timestamped_output_dir(base_output_dir, f"full_dataset_analysis_{DATASET}")
     print(f"Output directory: {output_dir}")
 
-    # Get subjects
-    fif_files = get_fif_files(args.conditions)
-    groups = get_subjects_by_group(fif_files)
+    # Get subjects using unified config
+    data_files = get_data_files_via_config(args.groups)
+    groups = get_subjects_by_group_unified(data_files)
 
-    print(f"\nDataset overview:")
-    for key in ["hc", "mci", "ad"]:
+    print(f"\nDataset overview ({DATASET}):")
+    for key in GROUP_CONFIG["keys"]:
         if groups.get(key):
-            print(f"  {key.upper()}: {len(groups[key])} subjects")
+            print(f"  {key}: {len(groups[key])} subjects")
+
+    if not any(groups.values()):
+        print("ERROR: No data files found. Check your data paths and dataset selection.")
+        return 1
 
     # Load model
     print("\nLoading model...")
     model_info = load_model_from_checkpoint(CHECKPOINT_PATH, DEVICE)
 
-    # Get n_channels
+    # Get n_channels from first available file
     all_subjects_list = []
-    for key in ["hc", "mci", "ad"]:
+    for key in GROUP_CONFIG["keys"]:
         all_subjects_list.extend(groups.get(key, []))
 
-    first_data = load_and_preprocess_fif(
+    first_data = load_and_preprocess_file(
         all_subjects_list[0][0], FILTER_LOW, FILTER_HIGH, CHUNK_DURATION,
         include_amplitude=model_info["include_amplitude"],
         verbose=False,
@@ -1667,10 +1708,11 @@ def main():
 
     # Save parameters for reproducibility
     save_parameters(output_dir, {
+        "dataset": DATASET,
         "n_subjects": args.n_subjects,
         "n_chunks": args.n_chunks,
         "n_bootstrap": args.n_bootstrap,
-        "conditions": args.conditions,
+        "groups": args.groups,
         "embedding": args.embedding,
         "methods": methods,
         "tau": args.tau,

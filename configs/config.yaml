@@ -13,12 +13,12 @@ experiment:
   seed: 42
   device: "auto"  # auto, cuda, mps, cpu
 
-# Paths (relative to hydra working directory)
+# Paths
 paths:
-  data_dir: "data"
-  output_dir: "outputs"
-  model_dir: "models"
-  results_dir: "results"
+  data_dir: "data"  # Absolute or relative to cwd
+  output_dir: "${hydra:runtime.cwd}/outputs"
+  model_dir: "${hydra:runtime.output_dir}/checkpoints"  # Saves to Hydra run directory
+  results_dir: "${hydra:runtime.output_dir}/results"
 
 # Logging
 logging:

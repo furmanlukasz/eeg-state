@@ -16,14 +16,22 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent / "src"))
 # =============================================================================
 
 # Available datasets: "greek_resting", "meditation_bids"
-DATASET = "greek_resting"
+# Set via environment variable or change here directly
+import os
+DATASET = os.environ.get("EEG_DATASET", "greek_resting")
 
 # =============================================================================
 # PATHS - Edit these to match your local setup
 # =============================================================================
 
-# Model checkpoint (from MatrixAutoEncoder repo or RunPod)
-CHECKPOINT_PATH = Path("/Users/luki/Documents/GitHub/eeg-state-biomarkers/models/best2.pt")
+# Model checkpoints for different datasets
+CHECKPOINT_PATHS = {
+    "greek_resting": Path("/Users/luki/Documents/GitHub/eeg-state-biomarkers/models/best2.pt"),
+    "meditation_bids": Path("/Users/luki/Documents/GitHub/eeg-state-biomarkers/models/best_meditation.pt"),
+}
+
+# Model checkpoint (selected based on dataset)
+CHECKPOINT_PATH = CHECKPOINT_PATHS.get(DATASET, CHECKPOINT_PATHS["greek_resting"])
 
 # Data directories for different datasets
 DATA_PATHS = {
@@ -208,7 +216,48 @@ def get_subjects_by_group(fif_files: list) -> dict:
 
 def get_label_name(label: int) -> str:
     """Get human-readable name for label."""
+    if DATASET == "meditation_bids":
+        return {0: "expert", 1: "novice"}.get(label, "Unknown")
     return {0: "HC", 1: "MCI", 2: "AD"}.get(label, "Unknown")
+
+
+def get_subjects_by_group_unified(data_files: list) -> dict:
+    """
+    Get unique subjects separated by group, works for any dataset.
+
+    Uses the DatasetConfig to determine group names.
+
+    Args:
+        data_files: List of (file_path, label, group_name) tuples
+
+    Returns:
+        Dict with group names as keys (lowercase), each containing list of
+        (file_path, label, group_name, subject_id) tuples
+    """
+    config = get_dataset_config()
+
+    # Build groups dict dynamically from config
+    if config is not None:
+        groups = {g.name.lower(): [] for g in config.groups}
+    else:
+        # Fallback for Greek dataset
+        groups = {"hc": [], "mci": [], "ad": []}
+
+    # Get unique subjects
+    seen_subjects = {}
+    for file_path, label, group_name in data_files:
+        if config is not None:
+            subject_id = config.get_subject_id(file_path)
+        else:
+            subject_id = get_subject_id(file_path)
+
+        if subject_id not in seen_subjects:
+            seen_subjects[subject_id] = (file_path, label, group_name, subject_id)
+            group_key = group_name.lower()
+            if group_key in groups:
+                groups[group_key].append((file_path, label, group_name, subject_id))
+
+    return groups
 
 
 # =============================================================================

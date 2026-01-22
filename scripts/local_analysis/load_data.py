@@ -12,12 +12,12 @@ import sys
 sys.path.insert(0, str(Path(__file__).parent.parent.parent / "src"))
 
 
-def load_eeg_from_fif(fif_path: Path, verbose: bool = True):
+def load_eeg_from_file(file_path: Path, verbose: bool = True):
     """
-    Load EEG data from .fif file.
+    Load EEG data from file (FIF or BDF format).
 
     Args:
-        fif_path: Path to .fif file
+        file_path: Path to .fif or .bdf file
         verbose: Whether to print info
 
     Returns:
@@ -29,15 +29,33 @@ def load_eeg_from_fif(fif_path: Path, verbose: bool = True):
     # Suppress MNE info messages
     mne.set_log_level("WARNING")
 
-    raw = mne.io.read_raw_fif(fif_path, preload=True)
+    # Detect file format
+    suffix = file_path.suffix.lower()
+
+    if suffix == ".fif":
+        raw = mne.io.read_raw_fif(file_path, preload=True)
+    elif suffix == ".bdf":
+        raw = mne.io.read_raw_bdf(file_path, preload=True)
+        # For BDF files, select only EEG channels (exclude GSR, respiration, etc.)
+        eeg_picks = mne.pick_types(raw.info, eeg=True, exclude=[])
+        if len(eeg_picks) > 0:
+            raw = raw.pick(eeg_picks)
+    else:
+        raise ValueError(f"Unsupported file format: {suffix}")
 
     if verbose:
-        print(f"Loaded: {fif_path.name}")
+        print(f"Loaded: {file_path.name}")
         print(f"  Channels: {len(raw.ch_names)}")
         print(f"  Duration: {raw.times[-1]:.1f}s")
         print(f"  Sfreq: {raw.info['sfreq']} Hz")
 
     return raw.get_data(), raw.info["sfreq"], raw.ch_names
+
+
+# Legacy alias for backwards compatibility
+def load_eeg_from_fif(fif_path: Path, verbose: bool = True):
+    """Legacy wrapper - use load_eeg_from_file instead."""
+    return load_eeg_from_file(fif_path, verbose)
 
 
 def extract_phase_circular(
@@ -120,8 +138,8 @@ def chunk_data(data: np.ndarray, chunk_samples: int, overlap: float = 0.0):
     return chunks
 
 
-def load_and_preprocess_fif(
-    fif_path: Path,
+def load_and_preprocess_file(
+    file_path: Path,
     filter_low: float = 1.0,
     filter_high: float = 30.0,
     chunk_duration: float = 5.0,
@@ -129,10 +147,10 @@ def load_and_preprocess_fif(
     verbose: bool = True,
 ):
     """
-    Load .fif file and extract phase chunks ready for model.
+    Load EEG file (FIF or BDF) and extract phase chunks ready for model.
 
     Args:
-        fif_path: Path to .fif file
+        file_path: Path to .fif or .bdf file
         filter_low: Bandpass low cutoff
         filter_high: Bandpass high cutoff
         chunk_duration: Chunk duration in seconds
@@ -148,7 +166,7 @@ def load_and_preprocess_fif(
             - subject_id: Extracted subject ID
     """
     # Load raw data
-    raw_data, sfreq, channel_names = load_eeg_from_fif(fif_path, verbose)
+    raw_data, sfreq, channel_names = load_eeg_from_file(file_path, verbose)
     n_channels = len(channel_names)
 
     # Extract phase
@@ -164,10 +182,12 @@ def load_and_preprocess_fif(
 
     if verbose:
         print(f"  Created {len(chunks)} chunks of {chunk_duration}s")
-        print(f"  Phase shape per chunk: {chunks[0].shape}")
+        if len(chunks) > 0:
+            print(f"  Phase shape per chunk: {chunks[0].shape}")
 
-    # Extract subject ID
-    subject_id = fif_path.parent.name.split()[0]
+    # Extract subject ID (handle both formats)
+    # BIDS: sub-001 from path; Greek: i002 from folder name
+    subject_id = _extract_subject_id(file_path)
 
     return {
         "chunks": chunks,
@@ -175,19 +195,51 @@ def load_and_preprocess_fif(
         "sfreq": sfreq,
         "channel_names": channel_names,
         "subject_id": subject_id,
-        "fif_path": fif_path,
+        "file_path": file_path,
     }
+
+
+def _extract_subject_id(file_path: Path) -> str:
+    """Extract subject ID from file path (handles both BIDS and Greek formats)."""
+    # Try BIDS format first: look for sub-XXX in path
+    for parent in file_path.parents:
+        if parent.name.startswith("sub-"):
+            return parent.name
+
+    # Greek format: extract from parent folder name
+    folder_name = file_path.parent.name
+    if " " in folder_name:
+        return folder_name.split()[0]
+    elif "_" in folder_name:
+        return folder_name.split("_")[0]
+    return folder_name
+
+
+# Legacy alias for backwards compatibility
+def load_and_preprocess_fif(
+    fif_path: Path,
+    filter_low: float = 1.0,
+    filter_high: float = 30.0,
+    chunk_duration: float = 5.0,
+    include_amplitude: bool = True,
+    verbose: bool = True,
+):
+    """Legacy wrapper - use load_and_preprocess_file instead."""
+    return load_and_preprocess_file(
+        fif_path, filter_low, filter_high, chunk_duration, include_amplitude, verbose
+    )
 
 
 if __name__ == "__main__":
     # Quick test with example file
-    from config import DATA_DIR, FILTER_LOW, FILTER_HIGH, CHUNK_DURATION
+    from config import DATA_DIR, FILTER_LOW, FILTER_HIGH, CHUNK_DURATION, DATASET
 
-    # Find first available .fif file
-    fif_files = list(DATA_DIR.rglob("*.fif"))
-    if fif_files:
-        result = load_and_preprocess_fif(
-            fif_files[0],
+    # Find first available file (FIF or BDF)
+    data_files = list(DATA_DIR.rglob("*.fif")) + list(DATA_DIR.rglob("*.bdf"))
+    if data_files:
+        print(f"Testing with {DATASET} dataset...")
+        result = load_and_preprocess_file(
+            data_files[0],
             FILTER_LOW,
             FILTER_HIGH,
             CHUNK_DURATION,
@@ -195,4 +247,4 @@ if __name__ == "__main__":
         )
         print(f"\nLoaded {result['subject_id']}: {len(result['chunks'])} chunks")
     else:
-        print(f"No .fif files found in {DATA_DIR}")
+        print(f"No .fif or .bdf files found in {DATA_DIR}")
