@@ -65,23 +65,68 @@ except ImportError:
 
 # Dynamic group colors and names based on dataset
 def get_group_config():
-    """Get group colors and names based on current dataset."""
+    """Get group colors and names based on current dataset.
+
+    Note: For meditation_bids, display names are capitalized (Expert, Novice)
+    to match the output of load_all_subjects().
+    """
     if DATASET == "meditation_bids":
         return {
-            "colors": {"expert": "#1f77b4", "novice": "#ff7f0e"},  # Blue, Orange
-            "names": {0: "expert", 1: "novice"},
+            # Colors keyed by display name (capitalized)
+            "colors": {"Expert": "#1f77b4", "Novice": "#ff7f0e"},  # Blue, Orange
+            "names": {0: "Expert", 1: "Novice"},
+            # Keys are lowercase for groups dict from get_subjects_by_group_unified
             "keys": ["expert", "novice"],
+            # Display names for subject_data dict keys
+            "display_names": ["Expert", "Novice"],
         }
     else:  # greek_resting
         return {
             "colors": {"HC": "#1f77b4", "MCI": "#ff7f0e", "AD": "#d62728"},  # Blue, Orange, Red
             "names": {0: "HC", 1: "MCI", 2: "AD"},
             "keys": ["hc", "mci", "ad"],
+            "display_names": ["HC", "MCI", "AD"],
         }
 
 GROUP_CONFIG = get_group_config()
 GROUP_COLORS = GROUP_CONFIG["colors"]
 GROUP_NAMES = GROUP_CONFIG["names"]
+
+
+def get_group_color(group_name: str) -> str:
+    """Get color for a group by name (works for any dataset)."""
+    # Direct lookup in colors dict
+    if group_name in GROUP_COLORS:
+        return GROUP_COLORS[group_name]
+    # Try lowercase
+    if group_name.lower() in GROUP_COLORS:
+        return GROUP_COLORS[group_name.lower()]
+    # Fallback
+    return "gray"
+
+
+def get_reference_group() -> str:
+    """Get the reference group name for the current dataset (first group)."""
+    if DATASET == "meditation_bids":
+        return "Expert"  # Capitalized to match load_all_subjects output
+    else:
+        return "HC"
+
+
+def get_comparison_groups() -> list[str]:
+    """Get the comparison group names (all groups except reference)."""
+    if DATASET == "meditation_bids":
+        return ["Novice"]  # Capitalized to match load_all_subjects output
+    else:
+        return ["MCI", "AD"]
+
+
+def get_all_groups() -> list[str]:
+    """Get all group names for the current dataset."""
+    if DATASET == "meditation_bids":
+        return ["Expert", "Novice"]  # Capitalized to match load_all_subjects output
+    else:
+        return ["HC", "MCI", "AD"]
 
 
 def create_timestamped_output_dir(base_dir: Path, script_name: str) -> Path:
@@ -715,10 +760,10 @@ def plot_bootstrap_metrics_comparison(
     metric_names = ["mean_speed", "speed_cv", "n_dwell_episodes", "occupancy_entropy", "path_tortuosity", "explored_variance"]
     metric_labels = ["Mean Speed", "Speed CV", "Dwell Episodes", "Occupancy Entropy", "Tortuosity", "Explored Variance"]
 
-    fig, axes = plt.subplots(2, 3, figsize=(15, 10))
+    fig, axes = plt.subplots(2, 3, figsize=(15, 10))  # Bar charts, not spatial
 
     groups = list(group_results.keys())
-    colors = [GROUP_COLORS.get({"HC": 0, "MCI": 1, "AD": 2}.get(g, 0), "gray") for g in groups]
+    colors = [get_group_color(g) for g in groups]
 
     for idx, (metric, label) in enumerate(zip(metric_names, metric_labels)):
         ax = axes.flatten()[idx]
@@ -765,13 +810,15 @@ def plot_density_difference_with_ci(
     show_plot: bool = True,
 ):
     """Plot density difference with statistical masking."""
-    fig, axes = plt.subplots(1, 3, figsize=(18, 6))
+    # 3 square panels (6x6 each) + space for colorbars (~1.5 per panel)
+    fig, axes = plt.subplots(1, 3, figsize=(22.5, 6))
     extent = list(bounds)
 
     # Mean difference
     vmax = np.abs(mean_diff).max()
     im1 = axes[0].imshow(mean_diff, origin='lower', extent=extent, cmap='RdBu_r', vmin=-vmax, vmax=vmax, aspect='equal')
-    axes[0].set_title(f"{group_name} − HC\nMean Difference", fontweight='bold')
+    ref_group = get_reference_group()
+    axes[0].set_title(f"{group_name} − {ref_group}\nMean Difference", fontweight='bold')
     plt.colorbar(im1, ax=axes[0], label='Δ Probability', shrink=0.8)
 
     # Statistically significant regions (CI doesn't include 0)
@@ -790,8 +837,9 @@ def plot_density_difference_with_ci(
     for ax in axes:
         ax.set_xlabel("Dim 1")
         ax.set_ylabel("Dim 2")
+        ax.set_aspect('equal', adjustable='box')  # Force square axes
 
-    plt.suptitle(f"Density Difference: {group_name} vs HC ({embedding_name})", fontsize=14, fontweight='bold')
+    plt.suptitle(f"Density Difference: {group_name} vs {ref_group} ({embedding_name})", fontsize=14, fontweight='bold')
     plt.tight_layout()
 
     save_path = output_dir / f"density_diff_ci_{group_name.lower()}_{embedding_name.lower().replace(' ', '_')}.png"
@@ -811,10 +859,10 @@ def plot_radial_profiles(
     show_plot: bool = True,
 ):
     """Plot radial density and speed profiles with CIs."""
-    fig, axes = plt.subplots(1, 2, figsize=(14, 6))
+    fig, axes = plt.subplots(1, 2, figsize=(14, 7))  # 2 square panels side by side
 
     for group, (bin_centers, density_ci, speed_ci) in group_profiles.items():
-        color = GROUP_COLORS.get({"HC": 0, "MCI": 1, "AD": 2}.get(group, 0), "gray")
+        color = get_group_color(group)
 
         # Density profile
         axes[0].plot(bin_centers, density_ci[0], color=color, label=group, linewidth=2)
@@ -859,7 +907,7 @@ def plot_effect_sizes(
     n_comparisons = len(comparisons)
     n_metrics = len(metrics)
 
-    fig, ax = plt.subplots(figsize=(12, 6))
+    fig, ax = plt.subplots(figsize=(12, 8))  # Effect size bar chart
 
     x = np.arange(n_metrics)
     width = 0.8 / n_comparisons
@@ -912,19 +960,20 @@ def plot_cross_embedding_robustness(
     methods = robustness["methods"]
     n_metrics = len(metrics)
 
-    fig, axes = plt.subplots(2, 3, figsize=(15, 10))
+    fig, axes = plt.subplots(2, 3, figsize=(15, 10))  # Correlation matrices
 
     for idx, metric in enumerate(metrics):
         ax = axes.flatten()[idx]
         corr_matrix = robustness["correlations"][metric]["matrix"]
         mean_corr = robustness["correlations"][metric]["mean_off_diagonal"]
 
-        im = ax.imshow(corr_matrix, cmap='RdYlGn', vmin=-1, vmax=1)
+        im = ax.imshow(corr_matrix, cmap='RdYlGn', vmin=-1, vmax=1, aspect='equal')
         ax.set_xticks(range(len(methods)))
         ax.set_yticks(range(len(methods)))
         ax.set_xticklabels(methods, rotation=45, ha='right')
         ax.set_yticklabels(methods)
         ax.set_title(f"{metric.replace('_', ' ').title()}\nMean ρ = {mean_corr:.2f}", fontweight='bold')
+        ax.set_aspect('equal', adjustable='box')  # Force square axes
 
         # Add correlation values
         for i in range(len(methods)):
@@ -1043,14 +1092,15 @@ def plot_group_flow_fields(
     - Flow magnitude
     - Trajectory density overlay
     """
-    groups_with_data = [g for g in ["HC", "MCI", "AD"] if len(subject_data.get(g, [])) >= 3]
+    groups_with_data = [g for g in get_all_groups() if len(subject_data.get(g, [])) >= 3]
     n_groups = len(groups_with_data)
 
     if n_groups < 2:
         print("  Not enough groups for flow field comparison")
         return
 
-    fig, axes = plt.subplots(2, n_groups, figsize=(6 * n_groups, 12))
+    # Square subplots for spatial data: 6x6 per subplot + colorbar space
+    fig, axes = plt.subplots(2, n_groups, figsize=(7.5 * n_groups, 12))
     if n_groups == 1:
         axes = axes.reshape(-1, 1)
 
@@ -1065,7 +1115,7 @@ def plot_group_flow_fields(
         flow_data[group] = (X, Y, flow_x, flow_y, counts)
 
         magnitude = np.sqrt(flow_x**2 + flow_y**2)
-        color = GROUP_COLORS.get({"HC": 0, "MCI": 1, "AD": 2}.get(group, 0), "gray")
+        color = get_group_color(group)
 
         # Top row: Flow field with trajectory overlay
         ax = axes[0, idx]
@@ -1088,7 +1138,7 @@ def plot_group_flow_fields(
 
         ax.set_xlim(extent[0], extent[1])
         ax.set_ylim(extent[2], extent[3])
-        ax.set_aspect('equal')
+        ax.set_aspect('equal', adjustable='box')  # Force square axes
         ax.set_xlabel("Dim 1")
         ax.set_ylabel("Dim 2")
         ax.set_title(f"{group} (n={len(subjects)})\nFlow Field + Density", fontweight='bold', color=color)
@@ -1100,7 +1150,7 @@ def plot_group_flow_fields(
 
         ax.set_xlim(extent[0], extent[1])
         ax.set_ylim(extent[2], extent[3])
-        ax.set_aspect('equal')
+        ax.set_aspect('equal', adjustable='box')  # Force square axes
         ax.set_xlabel("Dim 1")
         ax.set_ylabel("Dim 2")
         ax.set_title(f"{group} Flow Magnitude", fontweight='bold')
@@ -1132,58 +1182,60 @@ def plot_flow_difference(
     Plot flow field differences between groups.
 
     Shows:
-    - Vector difference (MCI - HC, AD - HC)
+    - Vector difference (comparison - reference)
     - Magnitude difference
     - Divergence/curl differences
     """
-    hc_subjects = subject_data.get("HC", [])
-    if len(hc_subjects) < 3:
-        print("  Not enough HC subjects for flow difference")
+    ref_group = get_reference_group()
+    ref_subjects = subject_data.get(ref_group, [])
+    if len(ref_subjects) < 3:
+        print(f"  Not enough {ref_group} subjects for flow difference")
         return
 
-    # Compute HC flow
-    X, Y, hc_flow_x, hc_flow_y, hc_counts = compute_group_flow_field(hc_subjects, embedder, grid_size)
-    hc_mag = np.sqrt(hc_flow_x**2 + hc_flow_y**2)
+    # Compute reference flow
+    X, Y, ref_flow_x, ref_flow_y, ref_counts = compute_group_flow_field(ref_subjects, embedder, grid_size)
+    ref_mag = np.sqrt(ref_flow_x**2 + ref_flow_y**2)
 
-    disease_groups = [g for g in ["MCI", "AD"] if len(subject_data.get(g, [])) >= 3]
-    n_disease = len(disease_groups)
+    comparison_groups = [g for g in get_comparison_groups() if len(subject_data.get(g, [])) >= 3]
+    n_comparison = len(comparison_groups)
 
-    if n_disease == 0:
-        print("  Not enough disease subjects for flow difference")
+    if n_comparison == 0:
+        print("  Not enough comparison subjects for flow difference")
         return
 
-    fig, axes = plt.subplots(3, n_disease, figsize=(7 * n_disease, 15))
-    if n_disease == 1:
+    # Square subplots for spatial data: 7x7 per subplot + colorbar space, 3 rows
+    fig, axes = plt.subplots(3, n_comparison, figsize=(8.5 * n_comparison, 21))
+    if n_comparison == 1:
         axes = axes.reshape(-1, 1)
 
     extent = list(embedder.bounds)
 
-    for idx, disease_group in enumerate(disease_groups):
-        disease_subjects = subject_data[disease_group]
+    for idx, comp_group in enumerate(comparison_groups):
+        comp_subjects = subject_data[comp_group]
 
-        # Compute disease flow
-        _, _, disease_flow_x, disease_flow_y, disease_counts = compute_group_flow_field(
-            disease_subjects, embedder, grid_size
+        # Compute comparison flow
+        _, _, comp_flow_x, comp_flow_y, comp_counts = compute_group_flow_field(
+            comp_subjects, embedder, grid_size
         )
-        disease_mag = np.sqrt(disease_flow_x**2 + disease_flow_y**2)
+        comp_mag = np.sqrt(comp_flow_x**2 + comp_flow_y**2)
 
         # Differences
-        diff_flow_x = disease_flow_x - hc_flow_x
-        diff_flow_y = disease_flow_y - hc_flow_y
-        diff_mag = disease_mag - hc_mag
+        diff_flow_x = comp_flow_x - ref_flow_x
+        diff_flow_y = comp_flow_y - ref_flow_y
+        diff_mag = comp_mag - ref_mag
         diff_vector_mag = np.sqrt(diff_flow_x**2 + diff_flow_y**2)
 
-        color = GROUP_COLORS.get({"HC": 0, "MCI": 1, "AD": 2}.get(disease_group, 1))
+        color = get_group_color(comp_group)
 
         # Row 1: Vector difference (quiver)
         ax = axes[0, idx]
         ax.quiver(X, Y, diff_flow_x, diff_flow_y, diff_vector_mag, cmap='coolwarm', alpha=0.9)
         ax.set_xlim(extent[0], extent[1])
         ax.set_ylim(extent[2], extent[3])
-        ax.set_aspect('equal')
+        ax.set_aspect('equal', adjustable='box')  # Force square axes
         ax.set_xlabel("Dim 1")
         ax.set_ylabel("Dim 2")
-        ax.set_title(f"{disease_group} − HC\nFlow Vector Difference", fontweight='bold', color=color)
+        ax.set_title(f"{comp_group} − {ref_group}\nFlow Vector Difference", fontweight='bold', color=color)
 
         # Row 2: Magnitude difference (heatmap)
         ax = axes[1, idx]
@@ -1193,26 +1245,26 @@ def plot_flow_difference(
         plt.colorbar(im, ax=ax, label='Δ Magnitude', shrink=0.8)
         ax.set_xlim(extent[0], extent[1])
         ax.set_ylim(extent[2], extent[3])
-        ax.set_aspect('equal')
+        ax.set_aspect('equal', adjustable='box')  # Force square axes
         ax.set_xlabel("Dim 1")
         ax.set_ylabel("Dim 2")
-        ax.set_title(f"{disease_group} − HC\nMagnitude Difference", fontweight='bold')
+        ax.set_title(f"{comp_group} − {ref_group}\nMagnitude Difference", fontweight='bold')
 
         # Row 3: Divergence difference
         ax = axes[2, idx]
-        hc_div = compute_flow_divergence(hc_flow_x, hc_flow_y)
-        disease_div = compute_flow_divergence(disease_flow_x, disease_flow_y)
-        diff_div = disease_div - hc_div
+        ref_div = compute_flow_divergence(ref_flow_x, ref_flow_y)
+        comp_div = compute_flow_divergence(comp_flow_x, comp_flow_y)
+        diff_div = comp_div - ref_div
         vmax = np.abs(diff_div).max()
         im = ax.imshow(diff_div, origin='lower', extent=extent, cmap='PuOr',
                        vmin=-vmax, vmax=vmax, aspect='equal')
         plt.colorbar(im, ax=ax, label='Δ Divergence', shrink=0.8)
         ax.set_xlim(extent[0], extent[1])
         ax.set_ylim(extent[2], extent[3])
-        ax.set_aspect('equal')
+        ax.set_aspect('equal', adjustable='box')  # Force square axes
         ax.set_xlabel("Dim 1")
         ax.set_ylabel("Dim 2")
-        ax.set_title(f"{disease_group} − HC\nDivergence Difference\n(+sources, −sinks)", fontweight='bold')
+        ax.set_title(f"{comp_group} − {ref_group}\nDivergence Difference\n(+sources, −sinks)", fontweight='bold')
 
     plt.suptitle(f"Flow Field Differences ({embedding_name})", fontsize=14, fontweight='bold')
     plt.tight_layout()
@@ -1384,20 +1436,21 @@ def run_full_analysis(
 
         # 2. Density difference with CI
         print(f"\nBootstrapping density differences...")
-        hc_subjects = subject_data.get("HC", [])
-        for disease_group in ["MCI", "AD"]:
-            disease_subjects = subject_data.get(disease_group, [])
-            if len(hc_subjects) < 3 or len(disease_subjects) < 3:
+        ref_group = get_reference_group()
+        ref_subjects = subject_data.get(ref_group, [])
+        for comp_group in get_comparison_groups():
+            comp_subjects = subject_data.get(comp_group, [])
+            if len(ref_subjects) < 3 or len(comp_subjects) < 3:
                 continue
 
-            print(f"  {disease_group} - HC...", end=" ", flush=True)
+            print(f"  {comp_group} - {ref_group}...", end=" ", flush=True)
             mean_diff, ci_low, ci_high = bootstrap_density_difference(
-                hc_subjects, disease_subjects, embedder, n_bootstrap
+                ref_subjects, comp_subjects, embedder, n_bootstrap
             )
             print("done")
 
             plot_density_difference_with_ci(
-                mean_diff, ci_low, ci_high, embedder.bounds, disease_group, output_dir, embedding_name, show_plot
+                mean_diff, ci_low, ci_high, embedder.bounds, comp_group, output_dir, embedding_name, show_plot
             )
 
         # 3. Radial profiles
@@ -1462,26 +1515,27 @@ def run_full_analysis(
 
     # Compute effect sizes
     effect_sizes = {}
-    hc_values = group_metric_values.get("HC", {})
+    ref_group = get_reference_group()
+    ref_values = group_metric_values.get(ref_group, {})
 
-    for disease_group in ["MCI", "AD"]:
-        disease_values = group_metric_values.get(disease_group, {})
-        if not disease_values or not hc_values:
+    for comp_group in get_comparison_groups():
+        comp_values = group_metric_values.get(comp_group, {})
+        if not comp_values or not ref_values:
             continue
 
-        comparison = f"HC vs {disease_group}"
+        comparison = f"{ref_group} vs {comp_group}"
         effect_sizes[comparison] = {}
 
         for metric in metric_names:
-            if metric not in hc_values or metric not in disease_values:
+            if metric not in ref_values or metric not in comp_values:
                 continue
-            if len(hc_values[metric]) < 3 or len(disease_values[metric]) < 3:
+            if len(ref_values[metric]) < 3 or len(comp_values[metric]) < 3:
                 continue
 
             print(f"  {comparison} - {metric}...", end=" ", flush=True)
             effect_sizes[comparison][metric] = bootstrap_effect_size(
-                np.array(hc_values[metric]),
-                np.array(disease_values[metric]),
+                np.array(ref_values[metric]),
+                np.array(comp_values[metric]),
                 n_bootstrap
             )
             print(f"d = {effect_sizes[comparison][metric].mean:.3f}")
