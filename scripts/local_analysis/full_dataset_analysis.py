@@ -401,17 +401,25 @@ class PooledEmbedder:
             self.transformer = PCA(n_components=2)
             embedded = self.transformer.fit_transform(pooled_data)
 
-        # Store bounds and centroid
-        margin = 0.05
-        x_range = embedded[:, 0].max() - embedded[:, 0].min()
-        y_range = embedded[:, 1].max() - embedded[:, 1].min()
-        self.bounds = (
-            embedded[:, 0].min() - margin * x_range,
-            embedded[:, 0].max() + margin * x_range,
-            embedded[:, 1].min() - margin * y_range,
-            embedded[:, 1].max() + margin * y_range,
-        )
+        # Store bounds and centroid - make bounds SQUARE and SYMMETRIC
         self.centroid = embedded.mean(axis=0)
+
+        # Find the maximum absolute deviation from centroid in either dimension
+        max_dev_x = max(abs(embedded[:, 0].max() - self.centroid[0]),
+                        abs(embedded[:, 0].min() - self.centroid[0]))
+        max_dev_y = max(abs(embedded[:, 1].max() - self.centroid[1]),
+                        abs(embedded[:, 1].min() - self.centroid[1]))
+        max_dev = max(max_dev_x, max_dev_y)
+
+        # Add margin and create symmetric square bounds around centroid
+        margin = 0.05
+        half_size = max_dev * (1 + margin)
+        self.bounds = (
+            self.centroid[0] - half_size,
+            self.centroid[0] + half_size,
+            self.centroid[1] - half_size,
+            self.centroid[1] + half_size,
+        )
 
     def _fit_diffusion_maps(self, data: np.ndarray, k: int = 10):
         max_points = 2000
@@ -750,6 +758,39 @@ def compute_cross_embedding_robustness(
 # PLOTTING FUNCTIONS
 # =============================================================================
 
+def create_square_subplots(n_rows: int, n_cols: int, panel_size: float = 5.0,
+                           cbar_frac: float = 0.15) -> tuple:
+    """
+    Create a figure with subplots sized for square data visualizations.
+
+    The axes will be square when used with aspect='equal' and square data bounds.
+
+    Args:
+        n_rows: Number of rows
+        n_cols: Number of columns
+        panel_size: Size of each square panel in inches
+        cbar_frac: Fraction of panel width for colorbar space
+
+    Returns:
+        fig, axes: Figure and array of axes (same shape as plt.subplots)
+    """
+    # Calculate figure dimensions - add space for colorbars
+    fig_width = n_cols * panel_size * (1 + cbar_frac)
+    fig_height = n_rows * panel_size + 1.0  # Extra for suptitle
+
+    fig, axes = plt.subplots(n_rows, n_cols, figsize=(fig_width, fig_height),
+                             squeeze=False, constrained_layout=True)
+
+    # Return with same shape conventions as before
+    if n_rows == 1 and n_cols == 1:
+        return fig, axes[0, 0]
+    elif n_rows == 1:
+        return fig, axes[0]
+    elif n_cols == 1:
+        return fig, axes[:, 0]
+    return fig, axes
+
+
 def plot_bootstrap_metrics_comparison(
     group_results: dict[str, dict[str, BootstrapResult]],
     output_dir: Path,
@@ -770,8 +811,9 @@ def plot_bootstrap_metrics_comparison(
 
         x_pos = np.arange(len(groups))
         means = [group_results[g][metric].mean for g in groups]
-        ci_lows = [group_results[g][metric].mean - group_results[g][metric].ci_low for g in groups]
-        ci_highs = [group_results[g][metric].ci_high - group_results[g][metric].mean for g in groups]
+        # Use absolute values to avoid negative yerr (can happen with bootstrap sampling)
+        ci_lows = [abs(group_results[g][metric].mean - group_results[g][metric].ci_low) for g in groups]
+        ci_highs = [abs(group_results[g][metric].ci_high - group_results[g][metric].mean) for g in groups]
 
         bars = ax.bar(x_pos, means, color=colors, alpha=0.7, edgecolor='black')
         ax.errorbar(x_pos, means, yerr=[ci_lows, ci_highs], fmt='none', color='black', capsize=5, linewidth=2)
@@ -810,37 +852,35 @@ def plot_density_difference_with_ci(
     show_plot: bool = True,
 ):
     """Plot density difference with statistical masking."""
-    # 3 square panels (6x6 each) + space for colorbars (~1.5 per panel)
-    fig, axes = plt.subplots(1, 3, figsize=(22.5, 6))
+    # 3 square panels in a row
+    fig, axes = create_square_subplots(1, 3, panel_size=5.0)
     extent = list(bounds)
+    ref_group = get_reference_group()
 
     # Mean difference
     vmax = np.abs(mean_diff).max()
     im1 = axes[0].imshow(mean_diff, origin='lower', extent=extent, cmap='RdBu_r', vmin=-vmax, vmax=vmax, aspect='equal')
-    ref_group = get_reference_group()
     axes[0].set_title(f"{group_name} − {ref_group}\nMean Difference", fontweight='bold')
-    plt.colorbar(im1, ax=axes[0], label='Δ Probability', shrink=0.8)
+    fig.colorbar(im1, ax=axes[0], label='Δ Probability', shrink=0.8)
 
     # Statistically significant regions (CI doesn't include 0)
     significant = (ci_low > 0) | (ci_high < 0)
     masked_diff = np.where(significant, mean_diff, np.nan)
     im2 = axes[1].imshow(masked_diff, origin='lower', extent=extent, cmap='RdBu_r', vmin=-vmax, vmax=vmax, aspect='equal')
     axes[1].set_title(f"Significant Regions\n(95% CI excludes 0)", fontweight='bold')
-    plt.colorbar(im2, ax=axes[1], label='Δ Probability', shrink=0.8)
+    fig.colorbar(im2, ax=axes[1], label='Δ Probability', shrink=0.8)
 
     # CI width (uncertainty)
     ci_width = ci_high - ci_low
     im3 = axes[2].imshow(ci_width, origin='lower', extent=extent, cmap='viridis', aspect='equal')
     axes[2].set_title("Uncertainty\n(CI Width)", fontweight='bold')
-    plt.colorbar(im3, ax=axes[2], label='CI Width', shrink=0.8)
+    fig.colorbar(im3, ax=axes[2], label='CI Width', shrink=0.8)
 
     for ax in axes:
         ax.set_xlabel("Dim 1")
         ax.set_ylabel("Dim 2")
-        ax.set_aspect('equal', adjustable='box')  # Force square axes
 
-    plt.suptitle(f"Density Difference: {group_name} vs {ref_group} ({embedding_name})", fontsize=14, fontweight='bold')
-    plt.tight_layout()
+    fig.suptitle(f"Density Difference: {group_name} vs {ref_group} ({embedding_name})", fontsize=14, fontweight='bold')
 
     save_path = output_dir / f"density_diff_ci_{group_name.lower()}_{embedding_name.lower().replace(' ', '_')}.png"
     fig.savefig(save_path, dpi=150, bbox_inches="tight")
@@ -960,34 +1000,33 @@ def plot_cross_embedding_robustness(
     methods = robustness["methods"]
     n_metrics = len(metrics)
 
-    fig, axes = plt.subplots(2, 3, figsize=(15, 10))  # Correlation matrices
+    # 2x3 grid of square panels
+    fig, axes = create_square_subplots(2, 3, panel_size=4.0)
 
     for idx, metric in enumerate(metrics):
         ax = axes.flatten()[idx]
         corr_matrix = robustness["correlations"][metric]["matrix"]
         mean_corr = robustness["correlations"][metric]["mean_off_diagonal"]
 
-        im = ax.imshow(corr_matrix, cmap='RdYlGn', vmin=-1, vmax=1, aspect='equal')
+        im = ax.imshow(corr_matrix, cmap='RdYlGn', vmin=-1, vmax=1)
         ax.set_xticks(range(len(methods)))
         ax.set_yticks(range(len(methods)))
         ax.set_xticklabels(methods, rotation=45, ha='right')
         ax.set_yticklabels(methods)
         ax.set_title(f"{metric.replace('_', ' ').title()}\nMean ρ = {mean_corr:.2f}", fontweight='bold')
-        ax.set_aspect('equal', adjustable='box')  # Force square axes
 
         # Add correlation values
         for i in range(len(methods)):
             for j in range(len(methods)):
                 ax.text(j, i, f'{corr_matrix[i, j]:.2f}', ha='center', va='center', fontsize=8)
 
-        plt.colorbar(im, ax=ax, label='Spearman ρ')
+        fig.colorbar(im, ax=ax, label='Spearman ρ', shrink=0.8)
 
     # Hide unused axes
     for idx in range(n_metrics, 6):
         axes.flatten()[idx].axis('off')
 
-    plt.suptitle(f"Cross-Embedding Robustness (n={robustness['n_subjects']} subjects)", fontsize=14, fontweight='bold')
-    plt.tight_layout()
+    fig.suptitle(f"Cross-Embedding Robustness (n={robustness['n_subjects']} subjects)", fontsize=14, fontweight='bold')
 
     save_path = output_dir / "cross_embedding_robustness.png"
     fig.savefig(save_path, dpi=150, bbox_inches="tight")
@@ -1099,10 +1138,8 @@ def plot_group_flow_fields(
         print("  Not enough groups for flow field comparison")
         return
 
-    # Square subplots for spatial data: 6x6 per subplot + colorbar space
-    fig, axes = plt.subplots(2, n_groups, figsize=(7.5 * n_groups, 12))
-    if n_groups == 1:
-        axes = axes.reshape(-1, 1)
+    # 2 rows × n_groups columns with square panels
+    fig, axes = create_square_subplots(2, n_groups, panel_size=5.0)
 
     extent = list(embedder.bounds)
     flow_data = {}
@@ -1138,7 +1175,7 @@ def plot_group_flow_fields(
 
         ax.set_xlim(extent[0], extent[1])
         ax.set_ylim(extent[2], extent[3])
-        ax.set_aspect('equal', adjustable='box')  # Force square axes
+        ax.set_aspect('equal')
         ax.set_xlabel("Dim 1")
         ax.set_ylabel("Dim 2")
         ax.set_title(f"{group} (n={len(subjects)})\nFlow Field + Density", fontweight='bold', color=color)
@@ -1146,17 +1183,16 @@ def plot_group_flow_fields(
         # Bottom row: Flow magnitude heatmap
         ax = axes[1, idx]
         im = ax.imshow(magnitude, origin='lower', extent=extent, cmap='viridis', aspect='equal')
-        plt.colorbar(im, ax=ax, label='Flow Magnitude', shrink=0.8)
+        fig.colorbar(im, ax=ax, label='Flow Magnitude', shrink=0.8)
 
         ax.set_xlim(extent[0], extent[1])
         ax.set_ylim(extent[2], extent[3])
-        ax.set_aspect('equal', adjustable='box')  # Force square axes
+        ax.set_aspect('equal')
         ax.set_xlabel("Dim 1")
         ax.set_ylabel("Dim 2")
         ax.set_title(f"{group} Flow Magnitude", fontweight='bold')
 
-    plt.suptitle(f"Group Flow Fields - Rabinovich-style ({embedding_name})", fontsize=14, fontweight='bold')
-    plt.tight_layout()
+    fig.suptitle(f"Group Flow Fields - Rabinovich-style ({embedding_name})", fontsize=14, fontweight='bold')
 
     save_path = output_dir / f"group_flow_fields_{embedding_name.lower().replace(' ', '_')}.png"
     fig.savefig(save_path, dpi=150, bbox_inches="tight")
@@ -1203,8 +1239,8 @@ def plot_flow_difference(
         print("  Not enough comparison subjects for flow difference")
         return
 
-    # Square subplots for spatial data: 7x7 per subplot + colorbar space, 3 rows
-    fig, axes = plt.subplots(3, n_comparison, figsize=(8.5 * n_comparison, 21))
+    # 3 rows × n_comparison columns with square panels
+    fig, axes = create_square_subplots(3, n_comparison, panel_size=5.0)
     if n_comparison == 1:
         axes = axes.reshape(-1, 1)
 
@@ -1232,7 +1268,7 @@ def plot_flow_difference(
         ax.quiver(X, Y, diff_flow_x, diff_flow_y, diff_vector_mag, cmap='coolwarm', alpha=0.9)
         ax.set_xlim(extent[0], extent[1])
         ax.set_ylim(extent[2], extent[3])
-        ax.set_aspect('equal', adjustable='box')  # Force square axes
+        ax.set_aspect('equal')
         ax.set_xlabel("Dim 1")
         ax.set_ylabel("Dim 2")
         ax.set_title(f"{comp_group} − {ref_group}\nFlow Vector Difference", fontweight='bold', color=color)
@@ -1242,10 +1278,10 @@ def plot_flow_difference(
         vmax = np.abs(diff_mag).max()
         im = ax.imshow(diff_mag, origin='lower', extent=extent, cmap='RdBu_r',
                        vmin=-vmax, vmax=vmax, aspect='equal')
-        plt.colorbar(im, ax=ax, label='Δ Magnitude', shrink=0.8)
+        fig.colorbar(im, ax=ax, label='Δ Magnitude', shrink=0.8)
         ax.set_xlim(extent[0], extent[1])
         ax.set_ylim(extent[2], extent[3])
-        ax.set_aspect('equal', adjustable='box')  # Force square axes
+        ax.set_aspect('equal')
         ax.set_xlabel("Dim 1")
         ax.set_ylabel("Dim 2")
         ax.set_title(f"{comp_group} − {ref_group}\nMagnitude Difference", fontweight='bold')
@@ -1258,16 +1294,15 @@ def plot_flow_difference(
         vmax = np.abs(diff_div).max()
         im = ax.imshow(diff_div, origin='lower', extent=extent, cmap='PuOr',
                        vmin=-vmax, vmax=vmax, aspect='equal')
-        plt.colorbar(im, ax=ax, label='Δ Divergence', shrink=0.8)
+        fig.colorbar(im, ax=ax, label='Δ Divergence', shrink=0.8)
         ax.set_xlim(extent[0], extent[1])
         ax.set_ylim(extent[2], extent[3])
-        ax.set_aspect('equal', adjustable='box')  # Force square axes
+        ax.set_aspect('equal')
         ax.set_xlabel("Dim 1")
         ax.set_ylabel("Dim 2")
         ax.set_title(f"{comp_group} − {ref_group}\nDivergence Difference\n(+sources, −sinks)", fontweight='bold')
 
-    plt.suptitle(f"Flow Field Differences ({embedding_name})", fontsize=14, fontweight='bold')
-    plt.tight_layout()
+    fig.suptitle(f"Flow Field Differences ({embedding_name})", fontsize=14, fontweight='bold')
 
     save_path = output_dir / f"flow_difference_{embedding_name.lower().replace(' ', '_')}.png"
     fig.savefig(save_path, dpi=150, bbox_inches="tight")

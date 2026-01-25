@@ -60,6 +60,11 @@ dependencies = [
     # Utilities
     "rich>=13.0",
     "tqdm>=4.65",
+
+    # Foundation models
+    "transformers>=4.30",
+    "huggingface_hub>=0.20",
+    "einops>=0.7",  # Required by REVE model
 ]
 
 [project.optional-dependencies]
