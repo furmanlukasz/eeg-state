@@ -1115,6 +1115,899 @@ def compute_flow_curl(flow_x: np.ndarray, flow_y: np.ndarray, dx: float = 1.0) -
     return dfy_dx - dfx_dy
 
 
+# =============================================================================
+# DYNAMICAL GEOMETRY COMPUTATIONS
+# =============================================================================
+
+def compute_trajectory_curvature(embedded: np.ndarray) -> np.ndarray:
+    """
+    Compute local curvature along a 2D trajectory.
+
+    Curvature κ(t) = |ẋ × ẍ| / |ẋ|³
+
+    For 2D: κ = |dx*ddy - dy*ddx| / (dx² + dy²)^(3/2)
+
+    Returns:
+        curvature: Array of curvature values (length T-2)
+    """
+    # First derivatives (velocity)
+    dx = np.gradient(embedded[:, 0])
+    dy = np.gradient(embedded[:, 1])
+
+    # Second derivatives (acceleration)
+    ddx = np.gradient(dx)
+    ddy = np.gradient(dy)
+
+    # Speed cubed
+    speed_sq = dx**2 + dy**2
+    speed_cubed = np.power(speed_sq, 1.5)
+
+    # Cross product magnitude in 2D: |dx*ddy - dy*ddx|
+    cross = np.abs(dx * ddy - dy * ddx)
+
+    # Curvature (avoid division by zero)
+    curvature = np.zeros_like(cross)
+    valid = speed_cubed > 1e-10
+    curvature[valid] = cross[valid] / speed_cubed[valid]
+
+    return curvature
+
+
+def compute_curvature_field(
+    subjects: list,
+    embedder,
+    bounds: tuple,
+    grid_size: int = 30,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """
+    Compute mean curvature as a spatial field.
+
+    Returns:
+        curvature_mean: Mean curvature per bin
+        curvature_std: Std of curvature per bin
+        counts: Sample counts per bin
+    """
+    xmin, xmax, ymin, ymax = bounds
+    x_edges = np.linspace(xmin, xmax, grid_size + 1)
+    y_edges = np.linspace(ymin, ymax, grid_size + 1)
+
+    curvature_sum = np.zeros((grid_size, grid_size))
+    curvature_sq_sum = np.zeros((grid_size, grid_size))
+    counts = np.zeros((grid_size, grid_size))
+
+    for subject in subjects:
+        embedded = embedder.transform(subject.trajectory)
+        curvature = compute_trajectory_curvature(embedded)
+
+        # Bin curvatures by position (use position at curvature point)
+        for i in range(len(curvature)):
+            x_bin = np.searchsorted(x_edges[:-1], embedded[i, 0]) - 1
+            y_bin = np.searchsorted(y_edges[:-1], embedded[i, 1]) - 1
+
+            x_bin = np.clip(x_bin, 0, grid_size - 1)
+            y_bin = np.clip(y_bin, 0, grid_size - 1)
+
+            curvature_sum[y_bin, x_bin] += curvature[i]
+            curvature_sq_sum[y_bin, x_bin] += curvature[i]**2
+            counts[y_bin, x_bin] += 1
+
+    # Compute mean and std
+    curvature_mean = np.zeros_like(curvature_sum)
+    curvature_std = np.zeros_like(curvature_sum)
+    valid = counts > 0
+    curvature_mean[valid] = curvature_sum[valid] / counts[valid]
+
+    valid_std = counts > 1
+    variance = (curvature_sq_sum[valid_std] / counts[valid_std] -
+                curvature_mean[valid_std]**2)
+    curvature_std[valid_std] = np.sqrt(np.maximum(variance, 0))
+
+    return curvature_mean, curvature_std, counts
+
+
+def compute_speed_curvature_distribution(
+    subjects: list,
+    embedder,
+    n_bins: int = 50,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """
+    Compute joint distribution of speed and curvature.
+
+    Returns:
+        H: 2D histogram (curvature x speed)
+        speed_edges: Speed bin edges
+        curvature_edges: Curvature bin edges
+    """
+    all_speeds = []
+    all_curvatures = []
+
+    for subject in subjects:
+        embedded = embedder.transform(subject.trajectory)
+        speed = compute_instantaneous_speed(embedded)
+        curvature = compute_trajectory_curvature(embedded)
+
+        # Align lengths (curvature is same length as embedded, speed is T-1)
+        min_len = min(len(speed), len(curvature))
+        all_speeds.extend(speed[:min_len])
+        all_curvatures.extend(curvature[:min_len])
+
+    all_speeds = np.array(all_speeds)
+    all_curvatures = np.array(all_curvatures)
+
+    # Use percentiles for robust binning
+    speed_max = np.percentile(all_speeds, 99)
+    curvature_max = np.percentile(all_curvatures, 99)
+
+    speed_edges = np.linspace(0, speed_max, n_bins + 1)
+    curvature_edges = np.linspace(0, curvature_max, n_bins + 1)
+
+    H, _, _ = np.histogram2d(all_curvatures, all_speeds,
+                              bins=[curvature_edges, speed_edges])
+
+    return H, speed_edges, curvature_edges
+
+
+def compute_dwell_time_field(
+    subjects: list,
+    embedder,
+    bounds: tuple,
+    grid_size: int = 30,
+    speed_threshold_percentile: float = 20,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """
+    Compute mean dwell time as a spatial field.
+
+    Dwell = consecutive time spent in low-speed state within a region.
+
+    Returns:
+        dwell_mean: Mean dwell time per bin
+        dwell_max: Max dwell time per bin
+        visit_counts: Number of visits per bin
+    """
+    xmin, xmax, ymin, ymax = bounds
+    x_edges = np.linspace(xmin, xmax, grid_size + 1)
+    y_edges = np.linspace(ymin, ymax, grid_size + 1)
+
+    # Accumulate dwell times per bin
+    dwell_times = [[[] for _ in range(grid_size)] for _ in range(grid_size)]
+
+    for subject in subjects:
+        embedded = embedder.transform(subject.trajectory)
+        speed = compute_instantaneous_speed(embedded)
+        threshold = np.percentile(speed, speed_threshold_percentile)
+
+        # Track consecutive dwelling
+        current_bin = None
+        dwell_count = 0
+
+        for i in range(len(speed)):
+            x_bin = np.searchsorted(x_edges[:-1], embedded[i, 0]) - 1
+            y_bin = np.searchsorted(y_edges[:-1], embedded[i, 1]) - 1
+            x_bin = np.clip(x_bin, 0, grid_size - 1)
+            y_bin = np.clip(y_bin, 0, grid_size - 1)
+
+            is_slow = speed[i] < threshold
+
+            if is_slow:
+                if current_bin == (x_bin, y_bin):
+                    dwell_count += 1
+                else:
+                    # Save previous dwell if exists
+                    if current_bin is not None and dwell_count > 0:
+                        dwell_times[current_bin[1]][current_bin[0]].append(dwell_count)
+                    current_bin = (x_bin, y_bin)
+                    dwell_count = 1
+            else:
+                # End of dwell episode
+                if current_bin is not None and dwell_count > 0:
+                    dwell_times[current_bin[1]][current_bin[0]].append(dwell_count)
+                current_bin = None
+                dwell_count = 0
+
+        # Don't forget last episode
+        if current_bin is not None and dwell_count > 0:
+            dwell_times[current_bin[1]][current_bin[0]].append(dwell_count)
+
+    # Compute statistics
+    dwell_mean = np.zeros((grid_size, grid_size))
+    dwell_max = np.zeros((grid_size, grid_size))
+    visit_counts = np.zeros((grid_size, grid_size))
+
+    for i in range(grid_size):
+        for j in range(grid_size):
+            if dwell_times[i][j]:
+                dwell_mean[i, j] = np.mean(dwell_times[i][j])
+                dwell_max[i, j] = np.max(dwell_times[i][j])
+                visit_counts[i, j] = len(dwell_times[i][j])
+
+    return dwell_mean, dwell_max, visit_counts
+
+
+def compute_directional_entropy_field(
+    subjects: list,
+    embedder,
+    bounds: tuple,
+    grid_size: int = 30,
+    n_angle_bins: int = 8,
+) -> tuple[np.ndarray, np.ndarray]:
+    """
+    Compute directional entropy (how committed motion is) per spatial bin.
+
+    High entropy = exploratory/uncertain direction
+    Low entropy = committed/directed motion
+
+    Returns:
+        dir_entropy: Directional entropy per bin
+        mean_angle: Mean angle per bin (for dominant direction)
+    """
+    xmin, xmax, ymin, ymax = bounds
+    x_edges = np.linspace(xmin, xmax, grid_size + 1)
+    y_edges = np.linspace(ymin, ymax, grid_size + 1)
+
+    # Collect angles per bin
+    angle_counts = [[np.zeros(n_angle_bins) for _ in range(grid_size)]
+                    for _ in range(grid_size)]
+
+    angle_bins = np.linspace(-np.pi, np.pi, n_angle_bins + 1)
+
+    for subject in subjects:
+        embedded = embedder.transform(subject.trajectory)
+        dx = np.diff(embedded[:, 0])
+        dy = np.diff(embedded[:, 1])
+        angles = np.arctan2(dy, dx)
+
+        for i in range(len(angles)):
+            x_bin = np.searchsorted(x_edges[:-1], embedded[i, 0]) - 1
+            y_bin = np.searchsorted(y_edges[:-1], embedded[i, 1]) - 1
+            x_bin = np.clip(x_bin, 0, grid_size - 1)
+            y_bin = np.clip(y_bin, 0, grid_size - 1)
+
+            angle_bin = np.searchsorted(angle_bins[:-1], angles[i]) - 1
+            angle_bin = np.clip(angle_bin, 0, n_angle_bins - 1)
+
+            angle_counts[y_bin][x_bin][angle_bin] += 1
+
+    # Compute entropy and mean angle
+    dir_entropy = np.zeros((grid_size, grid_size))
+    mean_angle = np.zeros((grid_size, grid_size))
+
+    for i in range(grid_size):
+        for j in range(grid_size):
+            counts = angle_counts[i][j]
+            total = counts.sum()
+            if total > 0:
+                p = counts / total
+                p = p[p > 0]  # Remove zeros for entropy
+                dir_entropy[i, j] = -np.sum(p * np.log(p + 1e-10))
+
+                # Mean angle (circular mean)
+                angle_centers = (angle_bins[:-1] + angle_bins[1:]) / 2
+                mean_sin = np.sum(counts * np.sin(angle_centers)) / total
+                mean_cos = np.sum(counts * np.cos(angle_centers)) / total
+                mean_angle[i, j] = np.arctan2(mean_sin, mean_cos)
+
+    # Normalize entropy to [0, 1] (max entropy = log(n_angle_bins))
+    max_entropy = np.log(n_angle_bins)
+    dir_entropy = dir_entropy / max_entropy
+
+    return dir_entropy, mean_angle
+
+
+def compute_ftle_field(
+    subjects: list,
+    embedder,
+    bounds: tuple,
+    grid_size: int = 20,
+    integration_time: int = 10,
+) -> np.ndarray:
+    """
+    Compute Finite-Time Lyapunov Exponent (FTLE) field.
+
+    FTLE measures local stretching/separation of nearby trajectories.
+    High FTLE = separatrices, transport barriers, unstable regions.
+
+    Returns:
+        ftle: FTLE values per grid cell
+    """
+    xmin, xmax, ymin, ymax = bounds
+    x_edges = np.linspace(xmin, xmax, grid_size + 1)
+    y_edges = np.linspace(ymin, ymax, grid_size + 1)
+    dx = (xmax - xmin) / grid_size
+    dy = (ymax - ymin) / grid_size
+
+    # First, build a flow field from data
+    X, Y, flow_x, flow_y, counts = compute_group_flow_field(
+        subjects, embedder, grid_size
+    )
+
+    # For FTLE, we need to estimate the deformation gradient
+    # We'll use a finite-difference approach on the flow field
+    ftle = np.zeros((grid_size, grid_size))
+
+    for i in range(1, grid_size - 1):
+        for j in range(1, grid_size - 1):
+            if counts[i, j] < 5:
+                continue
+
+            # Estimate deformation gradient using neighboring flow
+            # F = I + T * grad(v) approximately
+            dvx_dx = (flow_x[i, j+1] - flow_x[i, j-1]) / (2 * dx) if counts[i, j+1] > 0 and counts[i, j-1] > 0 else 0
+            dvx_dy = (flow_x[i+1, j] - flow_x[i-1, j]) / (2 * dy) if counts[i+1, j] > 0 and counts[i-1, j] > 0 else 0
+            dvy_dx = (flow_y[i, j+1] - flow_y[i, j-1]) / (2 * dx) if counts[i, j+1] > 0 and counts[i, j-1] > 0 else 0
+            dvy_dy = (flow_y[i+1, j] - flow_y[i-1, j]) / (2 * dy) if counts[i+1, j] > 0 and counts[i-1, j] > 0 else 0
+
+            # Deformation gradient tensor (approximation)
+            F = np.array([
+                [1 + integration_time * dvx_dx, integration_time * dvx_dy],
+                [integration_time * dvy_dx, 1 + integration_time * dvy_dy]
+            ])
+
+            # Cauchy-Green tensor
+            C = F.T @ F
+
+            # FTLE = (1/T) * log(sqrt(max eigenvalue of C))
+            eigenvalues = np.linalg.eigvalsh(C)
+            max_eigenvalue = max(eigenvalues)
+            if max_eigenvalue > 0:
+                ftle[i, j] = (1 / integration_time) * np.log(np.sqrt(max_eigenvalue))
+
+    return ftle
+
+
+def compute_temporal_heterogeneity_field(
+    subjects: list,
+    embedder,
+    bounds: tuple,
+    grid_size: int = 30,
+) -> tuple[np.ndarray, np.ndarray]:
+    """
+    Compute temporal heterogeneity (burstiness) of motion per spatial bin.
+
+    Returns:
+        speed_cv: Coefficient of variation of speed per bin
+        iei_mean: Mean inter-event interval (time between visits) per bin
+    """
+    xmin, xmax, ymin, ymax = bounds
+    x_edges = np.linspace(xmin, xmax, grid_size + 1)
+    y_edges = np.linspace(ymin, ymax, grid_size + 1)
+
+    # Collect speeds and inter-event intervals per bin
+    speeds_per_bin = [[[] for _ in range(grid_size)] for _ in range(grid_size)]
+    last_visit = [[None for _ in range(grid_size)] for _ in range(grid_size)]
+    iei_per_bin = [[[] for _ in range(grid_size)] for _ in range(grid_size)]
+
+    global_time = 0
+
+    for subject in subjects:
+        embedded = embedder.transform(subject.trajectory)
+        speed = compute_instantaneous_speed(embedded)
+
+        for i in range(len(speed)):
+            x_bin = np.searchsorted(x_edges[:-1], embedded[i, 0]) - 1
+            y_bin = np.searchsorted(y_edges[:-1], embedded[i, 1]) - 1
+            x_bin = np.clip(x_bin, 0, grid_size - 1)
+            y_bin = np.clip(y_bin, 0, grid_size - 1)
+
+            speeds_per_bin[y_bin][x_bin].append(speed[i])
+
+            # Track inter-event intervals
+            if last_visit[y_bin][x_bin] is not None:
+                iei = global_time - last_visit[y_bin][x_bin]
+                if iei > 0:
+                    iei_per_bin[y_bin][x_bin].append(iei)
+            last_visit[y_bin][x_bin] = global_time
+            global_time += 1
+
+    # Compute statistics
+    speed_cv = np.zeros((grid_size, grid_size))
+    iei_mean = np.zeros((grid_size, grid_size))
+
+    for i in range(grid_size):
+        for j in range(grid_size):
+            if len(speeds_per_bin[i][j]) > 1:
+                mean_speed = np.mean(speeds_per_bin[i][j])
+                if mean_speed > 0:
+                    speed_cv[i, j] = np.std(speeds_per_bin[i][j]) / mean_speed
+
+            if iei_per_bin[i][j]:
+                iei_mean[i, j] = np.mean(iei_per_bin[i][j])
+
+    return speed_cv, iei_mean
+
+
+# =============================================================================
+# DYNAMICAL GEOMETRY PLOTTING FUNCTIONS
+# =============================================================================
+
+def plot_curvature_analysis(
+    subject_data: dict[str, list],
+    embedder,
+    output_dir: Path,
+    embedding_name: str,
+    grid_size: int = 30,
+    show_plot: bool = True,
+):
+    """
+    Plot curvature analysis: spatial curvature maps and difference.
+
+    High curvature = decision points, switching, micro-instability
+    """
+    groups = [g for g in get_all_groups() if len(subject_data.get(g, [])) >= 3]
+    n_groups = len(groups)
+
+    if n_groups < 2:
+        print("  Not enough groups for curvature analysis")
+        return
+
+    extent = list(embedder.bounds)
+
+    # Compute curvature fields for each group
+    curvature_data = {}
+    for group in groups:
+        curv_mean, curv_std, counts = compute_curvature_field(
+            subject_data[group], embedder, embedder.bounds, grid_size
+        )
+        curvature_data[group] = (curv_mean, curv_std, counts)
+
+    # Plot: one row per group showing mean curvature, plus difference row
+    fig, axes = create_square_subplots(n_groups + 1, 2, panel_size=5.0)
+
+    # Individual group curvature maps
+    vmax = max(np.percentile(curvature_data[g][0][curvature_data[g][2] > 10], 95)
+               for g in groups if (curvature_data[g][2] > 10).any())
+
+    for idx, group in enumerate(groups):
+        curv_mean, curv_std, counts = curvature_data[group]
+        color = get_group_color(group)
+
+        # Mean curvature
+        ax = axes[idx, 0]
+        masked_curv = np.where(counts > 10, curv_mean, np.nan)
+        im = ax.imshow(masked_curv, origin='lower', extent=extent, cmap='hot',
+                       vmin=0, vmax=vmax, aspect='equal')
+        fig.colorbar(im, ax=ax, label='Mean Curvature', shrink=0.8)
+        ax.set_xlabel("Dim 1")
+        ax.set_ylabel("Dim 2")
+        ax.set_title(f"{group}\nMean Curvature", fontweight='bold', color=color)
+
+        # Curvature std (variability)
+        ax = axes[idx, 1]
+        masked_std = np.where(counts > 10, curv_std, np.nan)
+        im = ax.imshow(masked_std, origin='lower', extent=extent, cmap='viridis',
+                       aspect='equal')
+        fig.colorbar(im, ax=ax, label='Curvature Std', shrink=0.8)
+        ax.set_xlabel("Dim 1")
+        ax.set_ylabel("Dim 2")
+        ax.set_title(f"{group}\nCurvature Variability", fontweight='bold')
+
+    # Difference (comparison - reference)
+    ref_group = get_reference_group()
+    comp_groups = get_comparison_groups()
+    if comp_groups and ref_group in curvature_data:
+        comp_group = comp_groups[0]
+        if comp_group in curvature_data:
+            ref_curv = curvature_data[ref_group][0]
+            comp_curv = curvature_data[comp_group][0]
+            ref_counts = curvature_data[ref_group][2]
+            comp_counts = curvature_data[comp_group][2]
+
+            valid = (ref_counts > 10) & (comp_counts > 10)
+            diff_curv = np.where(valid, comp_curv - ref_curv, np.nan)
+
+            ax = axes[n_groups, 0]
+            vmax_diff = np.nanpercentile(np.abs(diff_curv), 95)
+            im = ax.imshow(diff_curv, origin='lower', extent=extent, cmap='RdBu_r',
+                           vmin=-vmax_diff, vmax=vmax_diff, aspect='equal')
+            fig.colorbar(im, ax=ax, label='Δ Curvature', shrink=0.8)
+            ax.set_xlabel("Dim 1")
+            ax.set_ylabel("Dim 2")
+            ax.set_title(f"{comp_group} − {ref_group}\nCurvature Difference", fontweight='bold')
+
+            axes[n_groups, 1].axis('off')
+
+    fig.suptitle(f"Trajectory Curvature Analysis ({embedding_name})", fontsize=14, fontweight='bold')
+
+    save_path = output_dir / f"curvature_analysis_{embedding_name.lower().replace(' ', '_')}.png"
+    fig.savefig(save_path, dpi=150, bbox_inches="tight")
+    print(f"Saved: {save_path}")
+
+    if show_plot:
+        plt.show()
+    else:
+        plt.close(fig)
+
+
+def plot_speed_curvature_phase(
+    subject_data: dict[str, list],
+    embedder,
+    output_dir: Path,
+    embedding_name: str,
+    show_plot: bool = True,
+):
+    """
+    Plot speed-curvature phase diagrams for each group.
+
+    Regions:
+    - Fast + low curvature = ballistic/skilled transport
+    - Slow + high curvature = dithering/unstable
+    - Slow + low curvature = dwelling/metastable
+    """
+    groups = [g for g in get_all_groups() if len(subject_data.get(g, [])) >= 3]
+    n_groups = len(groups)
+
+    if n_groups < 1:
+        return
+
+    fig, axes = create_square_subplots(1, n_groups, panel_size=5.0)
+    if n_groups == 1:
+        axes = [axes]
+
+    for idx, group in enumerate(groups):
+        H, speed_edges, curv_edges = compute_speed_curvature_distribution(
+            subject_data[group], embedder
+        )
+        color = get_group_color(group)
+
+        ax = axes[idx]
+        # Log scale for better visualization
+        H_log = np.log10(H + 1)
+        im = ax.imshow(H_log, origin='lower', aspect='auto',
+                       extent=[speed_edges[0], speed_edges[-1],
+                               curv_edges[0], curv_edges[-1]],
+                       cmap='viridis')
+        fig.colorbar(im, ax=ax, label='log₁₀(count + 1)', shrink=0.8)
+        ax.set_xlabel("Speed")
+        ax.set_ylabel("Curvature")
+        ax.set_title(f"{group}\nSpeed-Curvature Phase", fontweight='bold', color=color)
+
+        # Add regime labels
+        ax.text(0.95, 0.05, 'Dwelling', transform=ax.transAxes,
+                ha='right', va='bottom', fontsize=8, style='italic', alpha=0.7)
+        ax.text(0.95, 0.95, 'Unstable', transform=ax.transAxes,
+                ha='right', va='top', fontsize=8, style='italic', alpha=0.7)
+        ax.text(0.05, 0.05, 'Ballistic', transform=ax.transAxes,
+                ha='left', va='bottom', fontsize=8, style='italic', alpha=0.7)
+
+    fig.suptitle(f"Speed-Curvature Phase Diagrams ({embedding_name})", fontsize=14, fontweight='bold')
+
+    save_path = output_dir / f"speed_curvature_phase_{embedding_name.lower().replace(' ', '_')}.png"
+    fig.savefig(save_path, dpi=150, bbox_inches="tight")
+    print(f"Saved: {save_path}")
+
+    if show_plot:
+        plt.show()
+    else:
+        plt.close(fig)
+
+
+def plot_dwell_time_fields(
+    subject_data: dict[str, list],
+    embedder,
+    output_dir: Path,
+    embedding_name: str,
+    grid_size: int = 30,
+    show_plot: bool = True,
+):
+    """
+    Plot dwell time as spatial fields.
+
+    Shows where trajectories linger (sticky zones, weak attractors).
+    """
+    groups = [g for g in get_all_groups() if len(subject_data.get(g, [])) >= 3]
+    n_groups = len(groups)
+
+    if n_groups < 2:
+        return
+
+    extent = list(embedder.bounds)
+    fig, axes = create_square_subplots(n_groups, 2, panel_size=5.0)
+
+    for idx, group in enumerate(groups):
+        dwell_mean, dwell_max, visit_counts = compute_dwell_time_field(
+            subject_data[group], embedder, embedder.bounds, grid_size
+        )
+        color = get_group_color(group)
+
+        # Mean dwell time
+        ax = axes[idx, 0]
+        masked = np.where(visit_counts > 3, dwell_mean, np.nan)
+        im = ax.imshow(masked, origin='lower', extent=extent, cmap='YlOrRd', aspect='equal')
+        fig.colorbar(im, ax=ax, label='Mean Dwell Time', shrink=0.8)
+        ax.set_xlabel("Dim 1")
+        ax.set_ylabel("Dim 2")
+        ax.set_title(f"{group}\nMean Dwell Time", fontweight='bold', color=color)
+
+        # Visit frequency (stickiness)
+        ax = axes[idx, 1]
+        im = ax.imshow(np.log10(visit_counts + 1), origin='lower', extent=extent,
+                       cmap='Blues', aspect='equal')
+        fig.colorbar(im, ax=ax, label='log₁₀(visits + 1)', shrink=0.8)
+        ax.set_xlabel("Dim 1")
+        ax.set_ylabel("Dim 2")
+        ax.set_title(f"{group}\nVisit Frequency", fontweight='bold')
+
+    fig.suptitle(f"Dwell Time Fields ({embedding_name})", fontsize=14, fontweight='bold')
+
+    save_path = output_dir / f"dwell_time_fields_{embedding_name.lower().replace(' ', '_')}.png"
+    fig.savefig(save_path, dpi=150, bbox_inches="tight")
+    print(f"Saved: {save_path}")
+
+    if show_plot:
+        plt.show()
+    else:
+        plt.close(fig)
+
+
+def plot_directional_entropy(
+    subject_data: dict[str, list],
+    embedder,
+    output_dir: Path,
+    embedding_name: str,
+    grid_size: int = 30,
+    show_plot: bool = True,
+):
+    """
+    Plot directional entropy maps.
+
+    High entropy = exploratory/uncertain direction
+    Low entropy = committed/directed motion
+    """
+    groups = [g for g in get_all_groups() if len(subject_data.get(g, [])) >= 3]
+    n_groups = len(groups)
+
+    if n_groups < 2:
+        return
+
+    extent = list(embedder.bounds)
+    fig, axes = create_square_subplots(n_groups, 2, panel_size=5.0)
+
+    for idx, group in enumerate(groups):
+        dir_entropy, mean_angle = compute_directional_entropy_field(
+            subject_data[group], embedder, embedder.bounds, grid_size
+        )
+        color = get_group_color(group)
+
+        # Directional entropy
+        ax = axes[idx, 0]
+        im = ax.imshow(dir_entropy, origin='lower', extent=extent, cmap='plasma',
+                       vmin=0, vmax=1, aspect='equal')
+        fig.colorbar(im, ax=ax, label='Directional Entropy', shrink=0.8)
+        ax.set_xlabel("Dim 1")
+        ax.set_ylabel("Dim 2")
+        ax.set_title(f"{group}\nDirectional Entropy", fontweight='bold', color=color)
+
+        # Mean direction (as quiver overlay on entropy)
+        ax = axes[idx, 1]
+        im = ax.imshow(dir_entropy, origin='lower', extent=extent, cmap='Greys',
+                       vmin=0, vmax=1, alpha=0.3, aspect='equal')
+
+        # Create grid for quiver
+        xmin, xmax, ymin, ymax = embedder.bounds
+        x_centers = np.linspace(xmin, xmax, grid_size)
+        y_centers = np.linspace(ymin, ymax, grid_size)
+        X, Y = np.meshgrid(x_centers, y_centers)
+
+        # Direction vectors from mean angle
+        U = np.cos(mean_angle)
+        V = np.sin(mean_angle)
+
+        # Mask low-entropy regions (committed directions)
+        mask = dir_entropy < 0.7
+        ax.quiver(X[mask], Y[mask], U[mask], V[mask],
+                  color='blue', alpha=0.7, scale=30)
+        ax.set_xlim(extent[0], extent[1])
+        ax.set_ylim(extent[2], extent[3])
+        ax.set_xlabel("Dim 1")
+        ax.set_ylabel("Dim 2")
+        ax.set_title(f"{group}\nDominant Direction\n(low entropy regions)", fontweight='bold')
+
+    fig.suptitle(f"Directional Entropy Analysis ({embedding_name})", fontsize=14, fontweight='bold')
+
+    save_path = output_dir / f"directional_entropy_{embedding_name.lower().replace(' ', '_')}.png"
+    fig.savefig(save_path, dpi=150, bbox_inches="tight")
+    print(f"Saved: {save_path}")
+
+    if show_plot:
+        plt.show()
+    else:
+        plt.close(fig)
+
+
+def plot_ftle_analysis(
+    subject_data: dict[str, list],
+    embedder,
+    output_dir: Path,
+    embedding_name: str,
+    grid_size: int = 20,
+    show_plot: bool = True,
+):
+    """
+    Plot FTLE (Finite-Time Lyapunov Exponent) fields.
+
+    High FTLE ridges = separatrices, transport barriers.
+    """
+    groups = [g for g in get_all_groups() if len(subject_data.get(g, [])) >= 3]
+    n_groups = len(groups)
+
+    if n_groups < 2:
+        return
+
+    extent = list(embedder.bounds)
+    fig, axes = create_square_subplots(1, n_groups, panel_size=5.0)
+    if n_groups == 1:
+        axes = [axes]
+
+    ftle_data = {}
+    vmax = 0
+
+    for group in groups:
+        ftle = compute_ftle_field(
+            subject_data[group], embedder, embedder.bounds, grid_size
+        )
+        ftle_data[group] = ftle
+        vmax = max(vmax, np.percentile(ftle[ftle > 0], 95) if (ftle > 0).any() else 0)
+
+    for idx, group in enumerate(groups):
+        ftle = ftle_data[group]
+        color = get_group_color(group)
+
+        ax = axes[idx]
+        im = ax.imshow(ftle, origin='lower', extent=extent, cmap='inferno',
+                       vmin=0, vmax=vmax, aspect='equal')
+        fig.colorbar(im, ax=ax, label='FTLE', shrink=0.8)
+        ax.set_xlabel("Dim 1")
+        ax.set_ylabel("Dim 2")
+        ax.set_title(f"{group}\nFTLE (Stretching)", fontweight='bold', color=color)
+
+    fig.suptitle(f"Finite-Time Lyapunov Exponent ({embedding_name})", fontsize=14, fontweight='bold')
+
+    save_path = output_dir / f"ftle_analysis_{embedding_name.lower().replace(' ', '_')}.png"
+    fig.savefig(save_path, dpi=150, bbox_inches="tight")
+    print(f"Saved: {save_path}")
+
+    if show_plot:
+        plt.show()
+    else:
+        plt.close(fig)
+
+
+def plot_temporal_heterogeneity(
+    subject_data: dict[str, list],
+    embedder,
+    output_dir: Path,
+    embedding_name: str,
+    grid_size: int = 30,
+    show_plot: bool = True,
+):
+    """
+    Plot temporal heterogeneity (burstiness) maps.
+
+    Shows variance of motion over time, not space.
+    """
+    groups = [g for g in get_all_groups() if len(subject_data.get(g, [])) >= 3]
+    n_groups = len(groups)
+
+    if n_groups < 2:
+        return
+
+    extent = list(embedder.bounds)
+    fig, axes = create_square_subplots(n_groups, 2, panel_size=5.0)
+
+    for idx, group in enumerate(groups):
+        speed_cv, iei_mean = compute_temporal_heterogeneity_field(
+            subject_data[group], embedder, embedder.bounds, grid_size
+        )
+        color = get_group_color(group)
+
+        # Speed CV (burstiness)
+        ax = axes[idx, 0]
+        masked = np.where(speed_cv > 0, speed_cv, np.nan)
+        im = ax.imshow(masked, origin='lower', extent=extent, cmap='magma', aspect='equal')
+        fig.colorbar(im, ax=ax, label='Speed CV', shrink=0.8)
+        ax.set_xlabel("Dim 1")
+        ax.set_ylabel("Dim 2")
+        ax.set_title(f"{group}\nSpeed Variability (CV)", fontweight='bold', color=color)
+
+        # Inter-event interval (revisit patterns)
+        ax = axes[idx, 1]
+        masked = np.where(iei_mean > 0, np.log10(iei_mean + 1), np.nan)
+        im = ax.imshow(masked, origin='lower', extent=extent, cmap='cividis', aspect='equal')
+        fig.colorbar(im, ax=ax, label='log₁₀(mean IEI + 1)', shrink=0.8)
+        ax.set_xlabel("Dim 1")
+        ax.set_ylabel("Dim 2")
+        ax.set_title(f"{group}\nMean Revisit Interval", fontweight='bold')
+
+    fig.suptitle(f"Temporal Heterogeneity ({embedding_name})", fontsize=14, fontweight='bold')
+
+    save_path = output_dir / f"temporal_heterogeneity_{embedding_name.lower().replace(' ', '_')}.png"
+    fig.savefig(save_path, dpi=150, bbox_inches="tight")
+    print(f"Saved: {save_path}")
+
+    if show_plot:
+        plt.show()
+    else:
+        plt.close(fig)
+
+
+def plot_streamline_bundles(
+    subject_data: dict[str, list],
+    embedder,
+    output_dir: Path,
+    embedding_name: str,
+    grid_size: int = 20,
+    n_streamlines: int = 100,
+    show_plot: bool = True,
+):
+    """
+    Plot flow-line bundles showing transport coherence.
+
+    Shows dominant highways and fragmentation vs coherence.
+    """
+    from matplotlib.collections import LineCollection
+
+    groups = [g for g in get_all_groups() if len(subject_data.get(g, [])) >= 3]
+    n_groups = len(groups)
+
+    if n_groups < 2:
+        return
+
+    extent = list(embedder.bounds)
+    fig, axes = create_square_subplots(1, n_groups, panel_size=5.5)
+    if n_groups == 1:
+        axes = [axes]
+
+    for idx, group in enumerate(groups):
+        # Get flow field
+        X, Y, flow_x, flow_y, counts = compute_group_flow_field(
+            subject_data[group], embedder, grid_size
+        )
+        color = get_group_color(group)
+
+        ax = axes[idx]
+
+        # Plot background density
+        all_embedded = []
+        for s in subject_data[group]:
+            emb = embedder.transform(s.trajectory)
+            all_embedded.append(emb)
+        all_embedded = np.vstack(all_embedded)
+
+        H, _, _ = np.histogram2d(all_embedded[:, 0], all_embedded[:, 1], bins=50,
+                                  range=[[extent[0], extent[1]], [extent[2], extent[3]]])
+        H = gaussian_filter(H.T, sigma=1.5)
+        ax.imshow(H, origin='lower', extent=extent, cmap='Greys', alpha=0.3, aspect='equal')
+
+        # Generate streamlines using matplotlib's streamplot
+        # Need regular grid for streamplot
+        xmin, xmax, ymin, ymax = embedder.bounds
+        x_grid = np.linspace(xmin, xmax, grid_size)
+        y_grid = np.linspace(ymin, ymax, grid_size)
+
+        # Interpolate flow to regular grid (it's already on grid, just need proper format)
+        strm = ax.streamplot(x_grid, y_grid, flow_x.T, flow_y.T,
+                             density=1.5, linewidth=0.8, arrowsize=0.8,
+                             color=np.sqrt(flow_x.T**2 + flow_y.T**2),
+                             cmap='plasma', broken_streamlines=True)
+
+        ax.set_xlim(extent[0], extent[1])
+        ax.set_ylim(extent[2], extent[3])
+        ax.set_aspect('equal')
+        ax.set_xlabel("Dim 1")
+        ax.set_ylabel("Dim 2")
+        ax.set_title(f"{group}\nFlow Streamlines", fontweight='bold', color=color)
+
+    fig.suptitle(f"Streamline Bundles ({embedding_name})", fontsize=14, fontweight='bold')
+
+    save_path = output_dir / f"streamline_bundles_{embedding_name.lower().replace(' ', '_')}.png"
+    fig.savefig(save_path, dpi=150, bbox_inches="tight")
+    print(f"Saved: {save_path}")
+
+    if show_plot:
+        plt.show()
+    else:
+        plt.close(fig)
+
+
 def plot_group_flow_fields(
     subject_data: dict[str, list[SubjectData]],
     embedder: PooledEmbedder,
@@ -1509,6 +2402,37 @@ def run_full_analysis(
         # 5. Flow field differences
         print(f"\nComputing flow field differences...")
         plot_flow_difference(subject_data, embedder, output_dir, embedding_name, show_plot=show_plot)
+
+        # 6. Dynamical geometry visualizations
+        print(f"\n--- Dynamical Geometry Analysis ---")
+
+        # 6a. Curvature analysis
+        print(f"\nComputing trajectory curvature fields...")
+        plot_curvature_analysis(subject_data, embedder, output_dir, embedding_name, show_plot=show_plot)
+
+        # 6b. Speed-curvature phase plots
+        print(f"\nComputing speed-curvature phase plots...")
+        plot_speed_curvature_phase(subject_data, embedder, output_dir, embedding_name, show_plot=show_plot)
+
+        # 6c. Dwell-time spatial fields
+        print(f"\nComputing dwell-time fields...")
+        plot_dwell_time_fields(subject_data, embedder, output_dir, embedding_name, show_plot=show_plot)
+
+        # 6d. Directional entropy
+        print(f"\nComputing directional entropy fields...")
+        plot_directional_entropy(subject_data, embedder, output_dir, embedding_name, show_plot=show_plot)
+
+        # 6e. FTLE analysis
+        print(f"\nComputing FTLE fields...")
+        plot_ftle_analysis(subject_data, embedder, output_dir, embedding_name, show_plot=show_plot)
+
+        # 6f. Temporal heterogeneity (burstiness)
+        print(f"\nComputing temporal heterogeneity maps...")
+        plot_temporal_heterogeneity(subject_data, embedder, output_dir, embedding_name, show_plot=show_plot)
+
+        # 6g. Flow streamline bundles
+        print(f"\nComputing streamline bundles...")
+        plot_streamline_bundles(subject_data, embedder, output_dir, embedding_name, show_plot=show_plot)
 
         # Compute flow statistics for results
         flow_stats = {}
