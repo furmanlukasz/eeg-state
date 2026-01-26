@@ -121,8 +121,8 @@ class MetastableSwitchingSystem:
         latent_dim: int = 3,
         n_channels: int = 30,
         sfreq: float = 250.0,
-        noise_std: float = 0.05,
-        transition_prob: float = 0.002,  # ~2 transitions per minute at 250Hz
+        noise_std: float = 0.02,  # Reduced noise for cleaner basin separation
+        transition_prob: float = 0.0008,  # ~1 transition per 5s for good dwell (3-6s avg)
         seed: int = 42,
     ):
         self.n_regimes = n_regimes
@@ -143,22 +143,25 @@ class MetastableSwitchingSystem:
         self.regime_names = [f"Regime_{i}" for i in range(n_regimes)]
 
     def _create_regime_dynamics(self) -> list[np.ndarray]:
-        """Create distinct dynamical systems for each regime."""
+        """Create distinct dynamical systems for each regime.
+
+        Each regime has VERY DIFFERENT dynamics to ensure distinct speed/tortuosity.
+        All have strong decay to stay in their basin, but differ dramatically in rotation.
+        """
         dynamics = []
 
         for i in range(self.n_regimes):
-            # Create a stable linear system with different characteristics
-            # Eigenvalues determine stability and oscillation
+            # Make regimes DRAMATICALLY different in rotation (key metric difference)
 
             if i == 0:
-                # Regime 0: Tight, slow attractor - small movements near center
-                A = self._create_stable_dynamics(decay=0.80, rotation=0.05)
+                # Regime 0: VERY SLOW, almost static - minimal motion
+                A = self._create_stable_dynamics(decay=0.5, rotation=0.02)
             elif i == 1:
-                # Regime 1: Fast oscillatory regime - rapid circular motion
-                A = self._create_stable_dynamics(decay=0.92, rotation=0.5)
+                # Regime 1: FAST oscillatory - rapid spiraling (highest speed/tortuosity)
+                A = self._create_stable_dynamics(decay=0.75, rotation=0.45)
             else:
-                # Regime 2: Exploratory/diffusive - large wandering movements
-                A = self._create_stable_dynamics(decay=0.995, rotation=0.02)
+                # Regime 2: MODERATE but clearly different from R0 - medium oscillation
+                A = self._create_stable_dynamics(decay=0.65, rotation=0.25)
 
             dynamics.append(A)
 
@@ -213,11 +216,13 @@ class MetastableSwitchingSystem:
         latent_states[0] = self.rng.randn(self.latent_dim) * 0.5
         regime_labels[0] = current_regime
 
-        # Add regime-specific offset (different attractors) - make them VERY distinct
+        # Regime-specific basin centers - VERY well separated for distinct visual clusters
+        # Large magnitudes (5-6 units) with 120° angular separation in 2D projection
+        # This ensures Panel B shows THREE CLEARLY SEPARATED clouds
         regime_offsets = np.array([
-            [3.0, 0.0, 0.0],    # Regime 0: far right
-            [-2.0, 2.5, 0.0],   # Regime 1: upper left
-            [-1.0, -2.5, 0.0],  # Regime 2: lower left
+            [6.0, 0.0, 0.0],      # Regime 0: far right (+x axis)
+            [-3.0, 5.2, 0.0],     # Regime 1: upper left (120° from regime 0)
+            [-3.0, -5.2, 0.0],    # Regime 2: lower left (240° from regime 0)
         ])[:self.n_regimes, :self.latent_dim]
 
         # Evolve dynamics
@@ -295,23 +300,27 @@ class AttractorStabilitySystem:
         n_samples = int(duration * self.sfreq)
 
         if condition == "stable":
-            # Strong attractor: very fast decay, low noise
-            # Trajectory is tightly constrained to a small region around origin
-            decay = 0.6  # Very fast decay - quickly returns to attractor
-            noise_scale = 0.15  # Very low noise
-            attractor_center = np.zeros(self.latent_dim)  # Center at origin
+            # Strong attractor: fast decay, low noise, slow rotation
+            # Trajectory is tightly constrained, moves slowly, low tortuosity
+            decay = 0.7  # Fast decay - quickly returns to attractor
+            rotation = 0.05  # Minimal rotation - slow, smooth motion
+            noise_scale = 0.1  # Very low noise
             regime_name = "Stable"
         else:
-            # Weak attractor: essentially a random walk
-            # Trajectory wanders freely, explores large volume
-            decay = 0.9995  # Almost no decay - free diffusion
-            noise_scale = 0.8  # Moderate noise but accumulates over time
-            attractor_center = np.zeros(self.latent_dim)
+            # Exploratory: moderate decay but HIGH rotation/driving + high noise
+            # Trajectory moves fast, bends a lot (high tortuosity), explores space
+            # This creates the nice RING shape with HIGH speed
+            decay = 0.92  # Moderate decay - some pull but allows exploration
+            rotation = 0.5  # Strong rotation - rapid spiraling motion
+            noise_scale = 0.6  # High noise - drives exploration
             regime_name = "Exploratory"
 
-        # Create dynamics
+        # Create dynamics with rotation (key for speed/tortuosity)
         A = np.eye(self.latent_dim) * decay
-        A += self.rng.randn(self.latent_dim, self.latent_dim) * 0.01
+        # Add rotation (off-diagonal terms create oscillation/spiraling)
+        for i in range(self.latent_dim - 1):
+            A[i, i + 1] = rotation
+            A[i + 1, i] = -rotation
 
         # Ensure stability
         eigenvalues = np.linalg.eigvals(A)
@@ -1129,6 +1138,11 @@ def main():
     }
     with open(output_dir / "parameters.json", "w") as f:
         json.dump(params, f, indent=2)
+
+    # Copy this script to output directory for reproducibility
+    import shutil
+    script_path = Path(__file__)
+    shutil.copy2(script_path, output_dir / script_path.name)
 
     # =========================================================================
     # SIMULATION 1: Metastable Switching System
