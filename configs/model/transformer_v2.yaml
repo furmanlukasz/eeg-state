@@ -1,0 +1,58 @@
+# Transformer v2 model configuration - Optimized for full dataset
+# Based on critic agent recommendations:
+# - Increased depth (4 → 6 layers)
+# - Increased width (64 → 320 hidden size / d_model)
+# - More attention heads (4 → 10)
+# - Larger feedforward (256 → 640)
+# - Keep latent = 64 for interpretability
+#
+# Approximate parameter count: ~20-25M (up from ~10-15M)
+#
+# Use with: python -m eeg_biomarkers.training.train model=transformer_v2 training=optimized
+
+name: "transformer_autoencoder"
+
+encoder:
+  # Complexity controls conv layers before transformer (0-3)
+  # Keep at 2 for reasonable receptive field
+  complexity: 2
+
+  # Hidden size / d_model - the main transformer dimension
+  # Critic recommendation: 256 → 320-384
+  # Using 320 for balance between capacity and memory
+  hidden_size: 320
+
+  # Dropout for regularization
+  dropout: 0.1
+
+  # Transformer-specific settings
+  # Critic recommendation: increase layers from 4 → 6
+  n_transformer_layers: 6
+
+  # Attention heads - should divide hidden_size evenly
+  # 320 / 10 = 32 (good head dimension)
+  n_heads: 10
+
+  # Feedforward dimension in transformer
+  # Typically 2-4x d_model; using 2x for memory efficiency
+  dim_feedforward: 640
+
+decoder:
+  # Mirrors encoder by default
+  use_encoder_config: true
+
+  # Apply tanh to cos/sin outputs to constrain to [-1, 1]
+  # Helps with unit-circle constraint
+  constrain_output: true
+
+# Recurrence matrix settings (for RQA)
+recurrence:
+  threshold_method: "rr_controlled"
+  target_rr: 0.02  # 2% recurrence rate
+  fixed_epsilon: null
+
+# Phase representation with AMPLITUDE
+phase:
+  representation: "circular"  # (cos, sin) for phase
+  include_amplitude: true     # Include log(amplitude) as 3rd channel
+  normalize_amplitude: true   # Z-score normalize amplitude per recording

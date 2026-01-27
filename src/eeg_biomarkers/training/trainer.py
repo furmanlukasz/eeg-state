@@ -76,6 +76,16 @@ class Trainer:
         self.lambda_amplitude = getattr(cfg.training, "lambda_amplitude", 1.0)
         self.lambda_unit_circle = getattr(cfg.training, "lambda_unit_circle", 0.1)
 
+        # NEW: Angle consistency loss weight
+        # Encourages correct phase direction: 1 - mean(cos_true*cos_pred + sin_true*sin_pred)
+        self.lambda_angle = getattr(cfg.training, "lambda_angle", 0.0)
+
+        # NEW: Derivative loss weights (prevents over-smoothing)
+        # First derivative: MSE(Δx_pred, Δx_true)
+        self.lambda_derivative = getattr(cfg.training, "lambda_derivative", 0.0)
+        # Second derivative: MSE(Δ²x_pred, Δ²x_true)
+        self.lambda_derivative2 = getattr(cfg.training, "lambda_derivative2", 0.0)
+
         # Phase channels (2 for cos/sin, 3 if including amplitude)
         self.phase_channels = getattr(cfg.model.phase, "include_amplitude", False) and 3 or 2
 
@@ -199,6 +209,8 @@ class Trainer:
         Includes:
         - Separate weighting for phase (cos/sin) vs amplitude
         - Unit-circle regularization: penalize (cos² + sin² - 1)²
+        - Angle consistency loss: encourages correct phase direction
+        - Derivative loss: prevents over-smoothing (preserves high-frequency dynamics)
 
         Args:
             target: Ground truth (batch, features, time)
@@ -246,6 +258,44 @@ class Trainer:
             unit_violation = (cos_pred ** 2 + sin_pred ** 2 - 1) ** 2
             unit_loss = (unit_violation * phase_mask).sum() / (phase_mask.sum() + 1e-8)
             total_loss = total_loss + self.lambda_unit_circle * unit_loss
+
+        # Angle consistency loss: 1 - mean(cos_true*cos_pred + sin_true*sin_pred)
+        # Encourages correct phase direction even if norms drift
+        if self.lambda_angle > 0:
+            angle_consistency = cos_target * cos_pred + sin_target * sin_pred
+            angle_loss = (1.0 - angle_consistency) * phase_mask
+            angle_loss = angle_loss.sum() / (phase_mask.sum() + 1e-8)
+            total_loss = total_loss + self.lambda_angle * angle_loss
+
+        # First derivative loss: MSE(Δx_pred, Δx_true)
+        # Prevents over-smoothing by matching temporal gradients
+        if self.lambda_derivative > 0 and time > 1:
+            # Compute temporal derivatives (diff along time axis)
+            target_diff = target[:, :, 1:] - target[:, :, :-1]
+            pred_diff = prediction[:, :, 1:] - prediction[:, :, :-1]
+
+            # Mask for derivative (valid only where both adjacent points are valid)
+            diff_mask = mask[:, 1:] * mask[:, :-1]
+            diff_mask_expanded = diff_mask.unsqueeze(1).expand_as(target_diff)
+
+            deriv_error = (target_diff - pred_diff) ** 2
+            deriv_loss = (deriv_error * diff_mask_expanded).sum() / (diff_mask_expanded.sum() + 1e-8)
+            total_loss = total_loss + self.lambda_derivative * deriv_loss
+
+        # Second derivative loss: MSE(Δ²x_pred, Δ²x_true)
+        # For preserving transients/sharp features (use sparingly)
+        if self.lambda_derivative2 > 0 and time > 2:
+            # Compute second derivatives
+            target_diff2 = target[:, :, 2:] - 2 * target[:, :, 1:-1] + target[:, :, :-2]
+            pred_diff2 = prediction[:, :, 2:] - 2 * prediction[:, :, 1:-1] + prediction[:, :, :-2]
+
+            # Mask for second derivative
+            diff2_mask = mask[:, 2:] * mask[:, 1:-1] * mask[:, :-2]
+            diff2_mask_expanded = diff2_mask.unsqueeze(1).expand_as(target_diff2)
+
+            deriv2_error = (target_diff2 - pred_diff2) ** 2
+            deriv2_loss = (deriv2_error * diff2_mask_expanded).sum() / (diff2_mask_expanded.sum() + 1e-8)
+            total_loss = total_loss + self.lambda_derivative2 * deriv2_loss
 
         return total_loss
 

@@ -1,0 +1,73 @@
+# Optimized data configuration for full dataset training
+# Key changes:
+# - 10 second windows (up from 5s) to capture full metastable dwell times
+# - 50% overlap for smooth coverage
+# - Subject-balanced sampling
+#
+# Use with: python -m eeg_biomarkers.training.train data=optimized model=transformer_v2 training=optimized
+
+# Dataset type
+dataset: "greek_resting"
+
+# Data paths (relative to paths.data_dir)
+groups:
+  - name: "MCI"
+    path: "MCI"
+  - name: "HC"
+    path: "HID"
+
+# =============================================================================
+# PREPROCESSING
+# =============================================================================
+preprocessing:
+  # Filtering - keep 3-48 Hz for neural oscillations
+  filter_low: 3.0   # Hz (excludes slow drift)
+  filter_high: 48.0  # Hz (below line noise, includes gamma)
+  notch_freq: 50  # Line noise removal (50 Hz for Europe)
+
+  # Referencing - CSD reduces volume conduction
+  reference: "csd"
+
+  # =============================================================================
+  # CHUNKING - KEY CHANGE: 10s windows with 50% overlap
+  # =============================================================================
+  # Critic agent recommendation:
+  # - 10s windows capture full 3-10s dwell times
+  # - 50% overlap preserves sample count and smooths boundaries
+  # - At 250 Hz: 10s = 2500 samples per window
+  chunk_duration: 10.0  # seconds (up from 5.0)
+  chunk_overlap: 5.0    # seconds (50% overlap)
+
+  # Phase extraction
+  phase_method: "hilbert"
+
+# =============================================================================
+# SAMPLING - SUBJECT BALANCED
+# =============================================================================
+sampling:
+  n_subjects_per_group: null  # Use all subjects
+  random_seed: 42
+
+  # Subject-balanced sampling: equal windows per subject per epoch
+  # This prevents dominant subjects from biasing training
+  subject_balanced: true
+
+  # Robust normalization per recording
+  # Handles amplitude range differences across subjects
+  normalize_per_recording: true
+
+# =============================================================================
+# SPLITTING
+# =============================================================================
+splitting:
+  method: "group_kfold"  # Prevents segment-level leakage
+  n_splits: 5
+  test_size: 0.2
+  group_by: "subject"
+
+# =============================================================================
+# CACHING
+# =============================================================================
+caching:
+  enabled: true
+  cache_dir: "preprocessed_data_10s"  # Separate cache for 10s windows

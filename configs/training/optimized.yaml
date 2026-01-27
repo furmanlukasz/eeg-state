@@ -1,0 +1,121 @@
+# Optimized training configuration based on critic agent recommendations
+# Key improvements:
+# - Proper phase geometry loss (unit-circle + angle consistency)
+# - Derivative loss to prevent over-smoothing
+# - Separate phase/amplitude weighting
+# - Subject-balanced sampling (when available)
+#
+# Use with: python -m eeg_biomarkers.training.train training=optimized model=transformer_v2
+
+# Training loop
+epochs: 300  # More epochs for thorough training
+batch_size: 32  # Smaller batch for longer windows (10s = 2500 samples)
+gradient_accumulation_steps: 2  # Effective batch = 64
+
+# Gradient clipping (CRITICAL for training stability)
+gradient_clip_norm: 1.0
+
+# Early stopping
+early_stopping:
+  enabled: true
+  patience: 40  # More patience for complex loss
+  min_delta: 0.0005
+  monitor: "val_loss"
+
+# Checkpointing
+checkpointing:
+  enabled: true
+  save_every_n_epochs: 25
+  save_best: true
+  save_last: true
+
+# Optimizer
+optimizer:
+  name: "adamw"
+  lr: 0.0003  # Lower LR for transformer stability
+  weight_decay: 0.01
+  betas: [0.9, 0.999]
+
+# Learning rate scheduler
+scheduler:
+  name: "cosine"
+  warmup_epochs: 15  # More warmup for larger model
+  min_lr: 0.000005
+  factor: 0.5
+  patience: 10
+
+# Loss function
+loss:
+  name: "geometric"  # New geometric-aware loss
+
+# =============================================================================
+# LOSS COMPONENT WEIGHTING (Based on critic agent recommendations)
+# =============================================================================
+
+# Phase reconstruction (cos/sin MSE)
+lambda_phase: 1.0
+
+# Amplitude reconstruction (down-weighted as less critical for dynamics)
+# Recommended range: 0.2-0.4
+lambda_amplitude: 0.25
+
+# Unit-circle regularization: penalize (cos² + sin² - 1)²
+# Prevents model from shrinking cos/sin magnitudes to minimize MSE
+# Start at 0.1, increase to 0.3 if norm violation > 0.05
+lambda_unit_circle: 0.1
+
+# Angle consistency loss: 1 - mean(cos_true*cos_pred + sin_true*sin_pred)
+# Encourages correct phase direction even if norms drift
+# Recommended: 0.1-0.2
+lambda_angle: 0.1
+
+# First derivative loss: MSE(Δx_pred, Δx_true)
+# Prevents over-smoothing, preserves high-frequency dynamics
+# Recommended: 0.05
+lambda_derivative: 0.05
+
+# Second derivative loss (optional, for transients)
+# Only enable if still seeing "rounded corners" after D1
+# Recommended: 0.01-0.02 if used
+lambda_derivative2: 0.0
+
+# =============================================================================
+# CONTRASTIVE LOSS (Optional - enable after reconstruction is good)
+# =============================================================================
+
+# Total reconstruction weight (scales all recon components)
+lambda_reconstruction: 1.0
+
+# Contrastive loss (off by default - enable in curriculum phase 2)
+lambda_contrastive: 0.0
+lambda_triplet: 0.0
+contrastive_temperature: 0.07
+triplet_margin: 0.5
+contrastive_mode: "condition"
+
+# =============================================================================
+# REGULARIZATION
+# =============================================================================
+regularization:
+  label_smoothing: 0.0
+  mixup_alpha: 0.0
+
+# Validation
+validation:
+  enabled: true
+  frequency: 1
+  subset_fraction: null
+
+# =============================================================================
+# MIXED PRECISION (for GPU acceleration)
+# =============================================================================
+mixed_precision:
+  enabled: true  # Use FP16 on CUDA
+  # Note: Will automatically disable on CPU/MPS
+
+# =============================================================================
+# SUBJECT-BALANCED SAMPLING
+# =============================================================================
+sampling:
+  subject_balanced: true  # Equal windows per subject per epoch
+  shuffle_subjects: true

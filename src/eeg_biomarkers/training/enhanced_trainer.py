@@ -250,6 +250,11 @@ class EnhancedTrainer:
         self.lambda_contrastive = getattr(cfg.training, 'lambda_contrastive', 0.1)
         self.lambda_triplet = getattr(cfg.training, 'lambda_triplet', 0.0)  # Off by default
 
+        # NEW: Angle consistency and derivative loss weights
+        self.lambda_angle = getattr(cfg.training, 'lambda_angle', 0.0)
+        self.lambda_derivative = getattr(cfg.training, 'lambda_derivative', 0.0)
+        self.lambda_derivative2 = getattr(cfg.training, 'lambda_derivative2', 0.0)
+
         # Phase channels
         self.phase_channels = getattr(cfg.model.phase, 'include_amplitude', False) and 3 or 2
 
@@ -308,6 +313,13 @@ class EnhancedTrainer:
         """
         Compute reconstruction loss with separate phase/amplitude components.
 
+        Includes:
+        - Phase (cos/sin) reconstruction
+        - Amplitude reconstruction (if present)
+        - Unit-circle regularization
+        - Angle consistency loss
+        - Derivative loss (prevents over-smoothing)
+
         Returns:
             total_loss: Total reconstruction loss
             loss_dict: Dictionary of individual loss components
@@ -347,6 +359,36 @@ class EnhancedTrainer:
             unit_loss = (unit_violation * phase_mask).sum() / (phase_mask.sum() + 1e-8)
             total_loss = total_loss + self.lambda_unit_circle * unit_loss
             loss_dict['unit_circle_loss'] = unit_loss.item()
+
+        # Angle consistency loss: 1 - mean(cos_true*cos_pred + sin_true*sin_pred)
+        if self.lambda_angle > 0:
+            angle_consistency = cos_target * cos_pred + sin_target * sin_pred
+            angle_loss = (1.0 - angle_consistency) * phase_mask
+            angle_loss = angle_loss.sum() / (phase_mask.sum() + 1e-8)
+            total_loss = total_loss + self.lambda_angle * angle_loss
+            loss_dict['angle_loss'] = angle_loss.item()
+
+        # First derivative loss: MSE(Δx_pred, Δx_true)
+        if self.lambda_derivative > 0 and time > 1:
+            target_diff = target[:, :, 1:] - target[:, :, :-1]
+            pred_diff = prediction[:, :, 1:] - prediction[:, :, :-1]
+            diff_mask = mask[:, 1:] * mask[:, :-1]
+            diff_mask_expanded = diff_mask.unsqueeze(1).expand_as(target_diff)
+            deriv_error = (target_diff - pred_diff) ** 2
+            deriv_loss = (deriv_error * diff_mask_expanded).sum() / (diff_mask_expanded.sum() + 1e-8)
+            total_loss = total_loss + self.lambda_derivative * deriv_loss
+            loss_dict['derivative_loss'] = deriv_loss.item()
+
+        # Second derivative loss: MSE(Δ²x_pred, Δ²x_true)
+        if self.lambda_derivative2 > 0 and time > 2:
+            target_diff2 = target[:, :, 2:] - 2 * target[:, :, 1:-1] + target[:, :, :-2]
+            pred_diff2 = prediction[:, :, 2:] - 2 * prediction[:, :, 1:-1] + prediction[:, :, :-2]
+            diff2_mask = mask[:, 2:] * mask[:, 1:-1] * mask[:, :-2]
+            diff2_mask_expanded = diff2_mask.unsqueeze(1).expand_as(target_diff2)
+            deriv2_error = (target_diff2 - pred_diff2) ** 2
+            deriv2_loss = (deriv2_error * diff2_mask_expanded).sum() / (diff2_mask_expanded.sum() + 1e-8)
+            total_loss = total_loss + self.lambda_derivative2 * deriv2_loss
+            loss_dict['derivative2_loss'] = deriv2_loss.item()
 
         return total_loss, loss_dict
 
