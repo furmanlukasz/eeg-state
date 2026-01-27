@@ -10,8 +10,10 @@ dataset: "greek_resting"
 # AD folder contains Alzheimer's Disease subjects
 groups:
   - name: "AD"
+    label: 1
     path: "AD"
   - name: "HC"
+    label: 0
     path: "HID"
 
 # =============================================================================

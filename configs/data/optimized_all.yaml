@@ -10,10 +10,13 @@ dataset: "greek_resting"
 # All three groups: Alzheimer's, MCI, and Healthy Controls
 groups:
   - name: "AD"
+    label: 2
     path: "AD"
   - name: "MCI"
+    label: 1
     path: "MCI"
   - name: "HC"
+    label: 0
     path: "HID"
 
 # =============================================================================

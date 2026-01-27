@@ -12,8 +12,10 @@ dataset: "greek_resting"
 # Data paths (relative to paths.data_dir)
 groups:
   - name: "MCI"
+    label: 1
     path: "MCI"
   - name: "HC"
+    label: 0
     path: "HID"
 
 # =============================================================================
