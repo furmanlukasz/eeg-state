@@ -273,8 +273,9 @@ def plot_reconstruction_comparison(original: np.ndarray, reconstructed: np.ndarr
         axes[0].plot(time, orig_signal[ch] + offset, linewidth=0.5, alpha=0.8)
         axes[1].plot(time, recon_signal[ch] + offset, linewidth=0.5, alpha=0.8)
 
-    axes[0].set_title("Original EEG (phase)")
-    axes[1].set_title("Reconstructed EEG (phase)")
+    representation = "phase + amplitude" if phase_channels == 3 else "phase only"
+    axes[0].set_title(f"Original EEG ({representation})")
+    axes[1].set_title(f"Reconstructed EEG ({representation})")
     axes[1].set_xlabel("Time (s)")
 
     for ax in axes:

@@ -112,7 +112,8 @@ class MetastableSwitchingSystem:
     Generate synthetic data from a metastable switching dynamical system.
 
     Implements 2-3 linear dynamical systems with HMM-like switching.
-    Each regime has different dynamics (attractor strength, rotation speed).
+    Each regime has different dynamics AND different phase-coupling patterns
+    to create biologically plausible regime separation.
     """
 
     def __init__(
@@ -121,8 +122,9 @@ class MetastableSwitchingSystem:
         latent_dim: int = 3,
         n_channels: int = 30,
         sfreq: float = 250.0,
-        noise_std: float = 0.02,  # Reduced noise for cleaner basin separation
-        transition_prob: float = 0.0008,  # ~1 transition per 5s for good dwell (3-6s avg)
+        noise_std: float = 0.015,  # Low noise for clean basins
+        transition_prob: float = 0.0004,  # ~1 transition per 10s for balanced dwells (5-8s avg)
+        transition_smoothing: float = 0.5,  # Seconds to cross-fade between regimes
         seed: int = 42,
     ):
         self.n_regimes = n_regimes
@@ -131,41 +133,117 @@ class MetastableSwitchingSystem:
         self.sfreq = sfreq
         self.noise_std = noise_std
         self.transition_prob = transition_prob
+        self.transition_smoothing = transition_smoothing
         self.rng = np.random.RandomState(seed)
 
         # Create different dynamics matrices for each regime
         self.dynamics = self._create_regime_dynamics()
 
-        # Random mixing matrix: latent -> observations
-        self.mixing_matrix = self.rng.randn(n_channels, latent_dim) * 0.5
+        # Regime-specific noise scales (different "activity levels")
+        # This creates different trajectory densities/speeds per regime
+        self.regime_noise_scales = self._create_regime_noise_scales()
+
+        # Regime-specific mixing matrices (different phase-coupling topographies)
+        # This is KEY: each regime has different channel coupling patterns
+        self.mixing_matrices = self._create_regime_mixing_matrices()
 
         # Regime names
         self.regime_names = [f"Regime_{i}" for i in range(n_regimes)]
 
-    def _create_regime_dynamics(self) -> list[np.ndarray]:
-        """Create distinct dynamical systems for each regime.
+    def _create_regime_noise_scales(self) -> list[float]:
+        """Create regime-specific noise scales for different activity levels."""
+        return [
+            0.3,   # Regime 0: Low noise - quiet, stable
+            1.5,   # Regime 1: High noise - active, variable
+            0.8,   # Regime 2: Medium noise - moderate activity
+        ][:self.n_regimes]
 
-        Each regime has VERY DIFFERENT dynamics to ensure distinct speed/tortuosity.
-        All have strong decay to stay in their basin, but differ dramatically in rotation.
+    def _create_regime_dynamics(self) -> list[np.ndarray]:
+        """Create MAXIMALLY DISTINCT dynamical systems for each regime.
+
+        The key insight: for regimes to be separable in the autoencoder's latent space,
+        they need FUNDAMENTALLY DIFFERENT dynamics that create different trajectory
+        geometries. This means very different:
+        - Decay rates (how tightly confined vs exploratory)
+        - Rotation speeds (how fast the trajectory spirals)
+        - Noise sensitivity (how much they respond to perturbations)
+
+        These differences create distinct "fingerprints" in the phase-space that
+        the autoencoder learns to represent differently.
         """
         dynamics = []
 
         for i in range(self.n_regimes):
-            # Make regimes DRAMATICALLY different in rotation (key metric difference)
-
             if i == 0:
-                # Regime 0: VERY SLOW, almost static - minimal motion
+                # Regime 0: SLOW, STABLE - tight attractor, minimal movement
+                # Like a deep meditative state - very low activity
                 A = self._create_stable_dynamics(decay=0.5, rotation=0.02)
             elif i == 1:
-                # Regime 1: FAST oscillatory - rapid spiraling (highest speed/tortuosity)
-                A = self._create_stable_dynamics(decay=0.75, rotation=0.45)
+                # Regime 1: FAST, OSCILLATORY - rapid spiraling motion
+                # Like an alert, active state - high-frequency oscillations
+                A = self._create_stable_dynamics(decay=0.85, rotation=0.6)
             else:
-                # Regime 2: MODERATE but clearly different from R0 - medium oscillation
-                A = self._create_stable_dynamics(decay=0.65, rotation=0.25)
+                # Regime 2: EXPLORATORY - weak attractor, wandering
+                # Like a transitional/searching state - broad exploration
+                A = self._create_stable_dynamics(decay=0.95, rotation=0.15)
 
             dynamics.append(A)
 
         return dynamics
+
+    def _create_regime_mixing_matrices(self) -> list[np.ndarray]:
+        """Create regime-specific mixing matrices with MAXIMALLY DIFFERENT spatial patterns.
+
+        The key insight: for regimes to be separable after phase→autoencoder→PCA,
+        they need to activate DIFFERENT CHANNEL SUBSETS with DIFFERENT AMPLITUDES.
+
+        This mimics how real brain states have different spatial topographies.
+        """
+        mixing_matrices = []
+
+        # Define 3 non-overlapping channel groups (exclusive activation)
+        n_per_group = self.n_channels // 3
+        group1 = np.arange(0, n_per_group)                    # Channels 0-9
+        group2 = np.arange(n_per_group, 2 * n_per_group)      # Channels 10-19
+        group3 = np.arange(2 * n_per_group, self.n_channels)  # Channels 20-29
+
+        for regime in range(self.n_regimes):
+            # Very small base (near-zero for inactive channels)
+            M = self.rng.randn(self.n_channels, self.latent_dim) * 0.05
+
+            if regime == 0:
+                # Regime 0: GROUP 1 ACTIVE (frontal-like)
+                # Only first group has strong signal
+                M[group1, 0] = 3.0 + self.rng.randn(len(group1)) * 0.2
+                M[group1, 1] = 1.5 + self.rng.randn(len(group1)) * 0.2
+                M[group1, 2] = 0.8 + self.rng.randn(len(group1)) * 0.1
+                # Other groups: minimal (background noise level)
+                M[group2, :] *= 0.3
+                M[group3, :] *= 0.3
+
+            elif regime == 1:
+                # Regime 1: GROUP 2 ACTIVE (central-like)
+                # Only second group has strong signal
+                M[group2, 0] = 2.5 + self.rng.randn(len(group2)) * 0.2
+                M[group2, 1] = 2.0 + self.rng.randn(len(group2)) * 0.2
+                M[group2, 2] = 1.2 + self.rng.randn(len(group2)) * 0.1
+                # Other groups: minimal
+                M[group1, :] *= 0.3
+                M[group3, :] *= 0.3
+
+            else:
+                # Regime 2: GROUP 3 ACTIVE (posterior-like)
+                # Only third group has strong signal
+                M[group3, 0] = 2.8 + self.rng.randn(len(group3)) * 0.2
+                M[group3, 1] = 1.8 + self.rng.randn(len(group3)) * 0.2
+                M[group3, 2] = 1.0 + self.rng.randn(len(group3)) * 0.1
+                # Other groups: minimal
+                M[group1, :] *= 0.3
+                M[group2, :] *= 0.3
+
+            mixing_matrices.append(M)
+
+        return mixing_matrices
 
     def _create_stable_dynamics(self, decay: float, rotation: float) -> np.ndarray:
         """
@@ -196,7 +274,7 @@ class MetastableSwitchingSystem:
 
     def generate(self, duration: float) -> SimulationResult:
         """
-        Generate synthetic time series.
+        Generate synthetic time series with smooth regime transitions.
 
         Args:
             duration: Total duration in seconds
@@ -205,47 +283,91 @@ class MetastableSwitchingSystem:
             SimulationResult with ground truth and observations
         """
         n_samples = int(duration * self.sfreq)
+        smoothing_samples = int(self.transition_smoothing * self.sfreq)
 
         # Initialize
         latent_states = np.zeros((n_samples, self.latent_dim))
         regime_labels = np.zeros(n_samples, dtype=int)
         transition_times = []
 
-        # Start in random regime with random initial state
-        current_regime = self.rng.randint(self.n_regimes)
+        # Start in regime 0
+        current_regime = 0
         latent_states[0] = self.rng.randn(self.latent_dim) * 0.5
         regime_labels[0] = current_regime
 
-        # Regime-specific basin centers - VERY well separated for distinct visual clusters
-        # Large magnitudes (5-6 units) with 120° angular separation in 2D projection
-        # This ensures Panel B shows THREE CLEARLY SEPARATED clouds
+        # Regime-specific basin centers - well separated in latent space
+        # Triangle layout with 120° separation - LARGER magnitudes
         regime_offsets = np.array([
-            [6.0, 0.0, 0.0],      # Regime 0: far right (+x axis)
-            [-3.0, 5.2, 0.0],     # Regime 1: upper left (120° from regime 0)
-            [-3.0, -5.2, 0.0],    # Regime 2: lower left (240° from regime 0)
+            [10.0, 0.0, 0.0],      # Regime 0: far right (+x axis)
+            [-5.0, 8.7, 0.0],     # Regime 1: upper left (120°)
+            [-5.0, -8.7, 0.0],    # Regime 2: lower left (240°)
         ])[:self.n_regimes, :self.latent_dim]
 
+        # Track regime weights for smooth transitions
+        regime_weights = np.zeros((n_samples, self.n_regimes))
+        regime_weights[0, current_regime] = 1.0
+
+        # Track visits to ensure all regimes are covered
+        regime_visit_counts = np.zeros(self.n_regimes, dtype=int)
+        regime_visit_counts[current_regime] = 1
+
         # Evolve dynamics
+        pending_transition = None
+        transition_progress = 0
+        time_in_regime = 0
+        min_dwell_samples = int(3.0 * self.sfreq)  # Minimum 3 seconds per regime
+
         for t in range(1, n_samples):
-            # Possible regime transition
-            if self.rng.rand() < self.transition_prob:
-                new_regime = self.rng.randint(self.n_regimes)
-                if new_regime != current_regime:
-                    current_regime = new_regime
+            time_in_regime += 1
+
+            # Check for new transition (only after minimum dwell)
+            if pending_transition is None and time_in_regime > min_dwell_samples:
+                if self.rng.rand() < self.transition_prob:
+                    # Prefer transitions to less-visited regimes
+                    visit_weights = 1.0 / (regime_visit_counts + 1)
+                    visit_weights[current_regime] = 0  # Don't stay in same regime
+                    visit_probs = visit_weights / visit_weights.sum()
+                    new_regime = self.rng.choice(self.n_regimes, p=visit_probs)
+
+                    pending_transition = new_regime
+                    transition_progress = 0
                     transition_times.append(t)
+                    time_in_regime = 0
+
+            # Handle smooth transition
+            if pending_transition is not None:
+                transition_progress += 1
+                # Smooth cross-fade using sigmoid-like function
+                alpha = min(1.0, transition_progress / smoothing_samples)
+                alpha = 0.5 * (1 + np.tanh(4 * (alpha - 0.5)))  # Smooth S-curve
+
+                regime_weights[t, current_regime] = 1 - alpha
+                regime_weights[t, pending_transition] = alpha
+
+                if transition_progress >= smoothing_samples:
+                    current_regime = pending_transition
+                    regime_visit_counts[current_regime] += 1
+                    pending_transition = None
+            else:
+                regime_weights[t, current_regime] = 1.0
 
             regime_labels[t] = current_regime
 
-            # Apply dynamics relative to regime attractor
-            A = self.dynamics[current_regime]
-            offset = regime_offsets[current_regime]
+            # Blend dynamics, offsets, and noise scales based on regime weights
+            A_blend = sum(regime_weights[t, r] * self.dynamics[r] for r in range(self.n_regimes))
+            offset_blend = sum(regime_weights[t, r] * regime_offsets[r] for r in range(self.n_regimes))
+            noise_scale_blend = sum(regime_weights[t, r] * self.regime_noise_scales[r] for r in range(self.n_regimes))
 
             # State evolution: x(t+1) = A @ (x(t) - offset) + offset + noise
-            deviation = latent_states[t-1] - offset
-            latent_states[t] = A @ deviation + offset + self.rng.randn(self.latent_dim) * self.noise_std
+            deviation = latent_states[t-1] - offset_blend
+            latent_states[t] = A_blend @ deviation + offset_blend + self.rng.randn(self.latent_dim) * self.noise_std * noise_scale_blend
 
-        # Project to observations via mixing matrix
-        observations = latent_states @ self.mixing_matrix.T
+        # Project to observations using regime-specific mixing matrices
+        observations = np.zeros((n_samples, self.n_channels))
+        for t in range(n_samples):
+            # Blend mixing matrices based on regime weights
+            M_blend = sum(regime_weights[t, r] * self.mixing_matrices[r] for r in range(self.n_regimes))
+            observations[t] = latent_states[t] @ M_blend.T
 
         # Add observation noise
         observations += self.rng.randn(*observations.shape) * self.noise_std * 0.5
@@ -777,16 +899,17 @@ def compute_density_on_grid(
 # =============================================================================
 
 class PooledEmbedder:
-    """Fits PCA on pooled data, transforms individual trajectories."""
+    """Fits PCA or UMAP on pooled data, transforms individual trajectories."""
 
-    def __init__(self, n_components: int = 2):
+    def __init__(self, n_components: int = 2, method: str = "pca"):
         self.n_components = n_components
-        self.pca = None
+        self.method = method
+        self.reducer = None
         self.bounds = None
         self.centroid = None
 
     def fit(self, trajectories: list[np.ndarray], n_samples_per_traj: int = 500):
-        """Fit PCA on pooled trajectories."""
+        """Fit dimensionality reduction on pooled trajectories."""
         pooled = []
         for traj in trajectories:
             if len(traj) <= n_samples_per_traj:
@@ -797,8 +920,19 @@ class PooledEmbedder:
 
         pooled_data = np.vstack(pooled)
 
-        self.pca = PCA(n_components=self.n_components)
-        embedded = self.pca.fit_transform(pooled_data)
+        if self.method == "umap":
+            try:
+                from umap import UMAP
+                self.reducer = UMAP(n_components=self.n_components, n_neighbors=30, min_dist=0.1, random_state=42)
+                embedded = self.reducer.fit_transform(pooled_data)
+            except ImportError:
+                print("UMAP not available, falling back to PCA")
+                self.method = "pca"
+                self.reducer = PCA(n_components=self.n_components)
+                embedded = self.reducer.fit_transform(pooled_data)
+        else:
+            self.reducer = PCA(n_components=self.n_components)
+            embedded = self.reducer.fit_transform(pooled_data)
 
         # Store bounds (square, symmetric)
         self.centroid = embedded.mean(axis=0)
@@ -817,7 +951,7 @@ class PooledEmbedder:
 
     def transform(self, trajectory: np.ndarray) -> np.ndarray:
         """Transform a trajectory to 2D embedding."""
-        return self.pca.transform(trajectory)
+        return self.reducer.transform(trajectory)
 
 
 # =============================================================================
@@ -844,9 +978,14 @@ def create_simulation_figure(
     fig = plt.figure(figsize=(16, 12))
     gs = GridSpec(2, 2, figure=fig, hspace=0.3, wspace=0.3)
 
-    # Colors for regimes
+    # Colors for regimes - use highly distinct colors
     n_regimes = len(set(sim_result.regime_labels))
-    regime_colors = plt.cm.tab10(np.linspace(0, 1, n_regimes))
+    # Blue, Red, Green - maximally distinct
+    regime_colors = np.array([
+        [0.2, 0.4, 0.8, 1.0],   # Blue (Regime 0)
+        [0.9, 0.2, 0.2, 1.0],   # Red (Regime 1)
+        [0.2, 0.7, 0.3, 1.0],   # Green (Regime 2)
+    ])[:n_regimes]
 
     # --- Panel A: Ground-truth regime timeline ---
     ax_a = fig.add_subplot(gs[0, 0])
@@ -1122,8 +1261,8 @@ def main():
     print()
 
     # Parameters
-    n_epochs = 20 if args.quick else 50
-    hidden_size = 32
+    n_epochs = 20 if args.quick else 100  # More epochs for better learning
+    hidden_size = 64  # Larger hidden size for more representational capacity
 
     # Save parameters
     params = {
@@ -1203,9 +1342,9 @@ def main():
     latent_sim1 = compute_latent_trajectory(model_sim1, phase_data_sim1, DEVICE)
     print(f"  Latent shape: {latent_sim1.shape}")
 
-    # Fit embedder and transform
-    print("\nFitting PCA embedder...")
-    embedder_sim1 = PooledEmbedder(n_components=2)
+    # Fit embedder and transform - try UMAP for better regime separation
+    print("\nFitting UMAP embedder for Simulation 1...")
+    embedder_sim1 = PooledEmbedder(n_components=2, method="umap")
     embedder_sim1.fit([latent_sim1])
     embedded_sim1 = embedder_sim1.transform(latent_sim1)
     print(f"  Embedded shape: {embedded_sim1.shape}")
@@ -1421,7 +1560,12 @@ def main():
     gs = GridSpec(2, 4, figure=fig_combined, hspace=0.3, wspace=0.25)
 
     # --- Top row: Simulation 1 (Metastable Switching) ---
-    regime_colors = plt.cm.tab10(np.linspace(0, 1, n_regimes))
+    # Use highly distinct colors: Blue, Red, Green
+    regime_colors = np.array([
+        [0.2, 0.4, 0.8, 1.0],   # Blue (Regime 0)
+        [0.9, 0.2, 0.2, 1.0],   # Red (Regime 1)
+        [0.2, 0.7, 0.3, 1.0],   # Green (Regime 2)
+    ])[:n_regimes]
 
     # A) Regime timeline
     ax_a = fig_combined.add_subplot(gs[0, 0])
