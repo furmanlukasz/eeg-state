@@ -494,7 +494,8 @@ class EEGDataModule:
 
         def build_dataset(subjects: list[str], desc: str) -> Dataset:
             """Build dataset for a set of subjects, using cache."""
-            file_infos: list[tuple[Path, int, str]] = []
+            file_infos: list[tuple[Path, int, str]] = []  # For preload mode
+            datasets = []  # For ConcatDataset mode
             n_cached = 0
             n_processed = 0
             n_failed = 0
@@ -530,19 +531,30 @@ class EEGDataModule:
                             n_failed += 1
                             continue
 
-                    # Add to file_infos for MemoryEfficientConcatDataset
-                    file_infos.append((cache_path, label, subject_id))
+                    # Add to appropriate structure
+                    if use_preload:
+                        file_infos.append((cache_path, label, subject_id))
+                    else:
+                        try:
+                            ds = CachedFileDataset(cache_path, label, subject_id)
+                            datasets.append(ds)
+                        except Exception as e:
+                            logger.warning(f"Failed to load cache {cache_path}: {e}")
+                            n_failed += 1
 
             logger.info(
                 f"{desc}: {n_cached} cached, {n_processed} processed, {n_failed} failed"
             )
 
-            # Always use MemoryEfficientConcatDataset - it supports both modes:
-            # - preload=True: loads all data into RAM (fast training, high memory)
-            # - preload=False: LRU cache on-demand loading (slower but memory-efficient)
-            if not file_infos:
-                raise RuntimeError(f"No data loaded for {desc}!")
-            return MemoryEfficientConcatDataset(file_infos, preload=use_preload)
+            if use_preload:
+                if not file_infos:
+                    raise RuntimeError(f"No data loaded for {desc}!")
+                return MemoryEfficientConcatDataset(file_infos)
+            else:
+                if not datasets:
+                    raise RuntimeError(f"No data loaded for {desc}!")
+                logger.info(f"{desc}: {sum(len(d) for d in datasets)} total chunks")
+                return ConcatDataset(datasets)
 
         self.train_dataset = build_dataset(train_subjects, "train")
         self.val_dataset = build_dataset(val_subjects, "val")

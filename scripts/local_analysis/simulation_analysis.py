@@ -54,7 +54,7 @@ from torch.utils.data import DataLoader, TensorDataset
 # Add src to path for model imports
 sys.path.insert(0, str(Path(__file__).parent.parent.parent / "src"))
 
-from eeg_biomarkers.models import ConvLSTMAutoencoder
+from eeg_biomarkers.models import ConvLSTMAutoencoder, TransformerAutoencoder
 
 # =============================================================================
 # CONFIGURATION
@@ -388,10 +388,11 @@ class AttractorStabilitySystem:
     """
     Generate synthetic data comparing weakly vs strongly stable attractors.
 
-    Used to validate that the pipeline detects differences in:
-    - Speed
-    - Tortuosity
-    - Explored variance
+    Creates two visually distinct patterns:
+    - Stable: Central blob (tight attractor, fast decay to center)
+    - Exploratory: Ring/annulus (strong rotation maintains distance from center)
+
+    Both are centered at the origin for easy visual comparison.
     """
 
     def __init__(
@@ -408,7 +409,7 @@ class AttractorStabilitySystem:
         self.noise_std = noise_std
         self.rng = np.random.RandomState(seed)
 
-        # Mixing matrix
+        # Mixing matrix - shared for both conditions
         self.mixing_matrix = self.rng.randn(n_channels, latent_dim) * 0.5
 
     def generate(self, duration: float, condition: str) -> SimulationResult:
@@ -417,49 +418,68 @@ class AttractorStabilitySystem:
 
         Args:
             duration: Total duration in seconds
-            condition: "stable" (tight attractor) or "exploratory" (weak attractor)
+            condition: "stable" (central blob) or "exploratory" (ring)
         """
         n_samples = int(duration * self.sfreq)
 
         if condition == "stable":
-            # Strong attractor: fast decay, low noise, slow rotation
-            # Trajectory is tightly constrained, moves slowly, low tortuosity
-            decay = 0.7  # Fast decay - quickly returns to attractor
-            rotation = 0.05  # Minimal rotation - slow, smooth motion
-            noise_scale = 0.1  # Very low noise
+            # Strong attractor: VERY fast decay pulls everything to center
+            # Creates a TIGHT CENTRAL BLOB
+            decay = 0.80  # Fast decay toward center
+            rotation = 0.05  # Minimal rotation
+            noise_scale = 0.5  # Some noise but pulls back to center
+            radius_target = 0.0  # No radius offset - centered
             regime_name = "Stable"
         else:
-            # Exploratory: moderate decay but HIGH rotation/driving + high noise
-            # Trajectory moves fast, bends a lot (high tortuosity), explores space
-            # This creates the nice RING shape with HIGH speed
-            decay = 0.92  # Moderate decay - some pull but allows exploration
-            rotation = 0.5  # Strong rotation - rapid spiraling motion
-            noise_scale = 0.6  # High noise - drives exploration
+            # Exploratory: STRONG ROTATION creates clear circular motion
+            # Moderate decay with strong radial restoring = PERFECT RING
+            decay = 0.998  # Almost no decay - maintains radius
+            rotation = 0.08  # Moderate rotation - smooth circular motion
+            noise_scale = 0.15  # Very low noise - clean ring
+            radius_target = 3.0  # Larger target radius for clearer ring
             regime_name = "Exploratory"
 
-        # Create dynamics with rotation (key for speed/tortuosity)
+        # Create rotation matrix (2D rotation in first 2 dims)
         A = np.eye(self.latent_dim) * decay
-        # Add rotation (off-diagonal terms create oscillation/spiraling)
-        for i in range(self.latent_dim - 1):
-            A[i, i + 1] = rotation
-            A[i + 1, i] = -rotation
 
-        # Ensure stability
-        eigenvalues = np.linalg.eigvals(A)
-        max_eig = np.max(np.abs(eigenvalues))
-        if max_eig >= 1:
-            A = A * (0.99 / max_eig)
+        # Pure rotation in xy-plane
+        cos_r = np.cos(rotation)
+        sin_r = np.sin(rotation)
+        A[0, 0] = decay * cos_r
+        A[0, 1] = decay * -sin_r
+        A[1, 0] = decay * sin_r
+        A[1, 1] = decay * cos_r
 
         # Generate trajectory
         latent_states = np.zeros((n_samples, self.latent_dim))
-        latent_states[0] = self.rng.randn(self.latent_dim) * 0.5
+
+        if condition == "exploratory":
+            # Start on the ring (at target radius)
+            latent_states[0, 0] = radius_target
+            latent_states[0, 1] = 0.0
+        else:
+            # Start near center
+            latent_states[0] = self.rng.randn(self.latent_dim) * 0.2
 
         for t in range(1, n_samples):
-            latent_states[t] = A @ latent_states[t-1] + self.rng.randn(self.latent_dim) * self.noise_std * noise_scale
+            # Apply dynamics
+            latent_states[t] = A @ latent_states[t-1]
+
+            # Add noise
+            latent_states[t] += self.rng.randn(self.latent_dim) * self.noise_std * noise_scale
+
+            # For exploratory: add STRONG radial restoring force to maintain ring
+            if condition == "exploratory":
+                current_radius = np.sqrt(latent_states[t, 0]**2 + latent_states[t, 1]**2)
+                if current_radius > 0.01:
+                    # Strong restoring force to maintain exact ring radius
+                    radial_correction = 0.05 * (radius_target - current_radius)
+                    latent_states[t, 0] += radial_correction * latent_states[t, 0] / current_radius
+                    latent_states[t, 1] += radial_correction * latent_states[t, 1] / current_radius
 
         # Project to observations
         observations = latent_states @ self.mixing_matrix.T
-        observations += self.rng.randn(*observations.shape) * self.noise_std * 0.5
+        observations += self.rng.randn(*observations.shape) * self.noise_std * 0.3
 
         time = np.arange(n_samples) / self.sfreq
 
@@ -662,9 +682,14 @@ def train_simulation_model(
     lr: float = 1e-3,
     device: str = "cpu",
     verbose: bool = True,
+    labels: list[int] | None = None,
+    use_contrastive: bool = False,
+    contrastive_weight: float = 0.15,
+    contrastive_temperature: float = 0.07,
+    use_transformer: bool = False,
 ) -> SimulationAutoencoder:
     """
-    Train a lightweight autoencoder on simulation data.
+    Train an autoencoder on simulation data with optional two-phase training.
 
     Args:
         chunks: List of (n_features, chunk_samples) arrays
@@ -675,21 +700,57 @@ def train_simulation_model(
         lr: Learning rate
         device: Device to train on
         verbose: Print progress
+        labels: Optional regime labels for contrastive learning
+        use_contrastive: Enable contrastive loss (Phase 2)
+        contrastive_weight: Weight for contrastive loss
+        contrastive_temperature: Temperature for contrastive softmax
+        use_transformer: Use TransformerAutoencoder instead of SimulationAutoencoder
 
     Returns:
         Trained model
     """
     # Create dataset
     data = torch.stack([torch.from_numpy(c) for c in chunks])  # (N, features, time)
-    dataset = TensorDataset(data)
+
+    if labels is not None:
+        label_tensor = torch.tensor(labels, dtype=torch.long)
+        dataset = TensorDataset(data, label_tensor)
+    else:
+        dataset = TensorDataset(data)
+
     dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=True)
 
     # Create model
-    model = SimulationAutoencoder(
-        n_channels=n_channels,
-        hidden_size=hidden_size,
-        phase_channels=3,
-    )
+    if use_transformer:
+        from omegaconf import OmegaConf
+        model_cfg = OmegaConf.create({
+            'name': 'transformer_autoencoder',
+            'encoder': {
+                'hidden_size': hidden_size,
+                'num_layers': 2,
+                'nhead': 4,
+                'dim_feedforward': hidden_size * 2,
+                'dropout': 0.1,
+            },
+            'decoder': {
+                'hidden_size': hidden_size,
+                'num_layers': 2,
+                'nhead': 4,
+                'dim_feedforward': hidden_size * 2,
+                'dropout': 0.1,
+            },
+            'phase': {
+                'include_amplitude': True,
+            },
+        })
+        model = TransformerAutoencoder.from_config(model_cfg, n_channels)
+    else:
+        model = SimulationAutoencoder(
+            n_channels=n_channels,
+            hidden_size=hidden_size,
+            phase_channels=3,
+        )
+
     model = model.to(device)
     model.train()
 
@@ -697,31 +758,132 @@ def train_simulation_model(
     optimizer = torch.optim.AdamW(model.parameters(), lr=lr)
     criterion = nn.MSELoss()
 
+    # Contrastive loss if enabled
+    contrastive_loss_fn = None
+    if use_contrastive and labels is not None:
+        contrastive_loss_fn = ContrastiveLoss(temperature=contrastive_temperature, mode="condition")
+
     # Training loop
     losses = []
-    iterator = tqdm(range(n_epochs), desc="Training") if verbose else range(n_epochs)
+    phase_str = "Phase 2 (Contrastive)" if use_contrastive else "Phase 1 (Reconstruction)"
+    iterator = tqdm(range(n_epochs), desc=f"Training {phase_str}") if verbose else range(n_epochs)
 
     for epoch in iterator:
         epoch_loss = 0.0
-        for (batch,) in dataloader:
+        epoch_recon = 0.0
+        epoch_contr = 0.0
+        n_batches = 0
+
+        for batch_data in dataloader:
+            if labels is not None:
+                batch, batch_labels = batch_data
+                batch_labels = batch_labels.to(device)
+            else:
+                (batch,) = batch_data
+                batch_labels = None
+
             batch = batch.float().to(device)
 
             optimizer.zero_grad()
-            reconstruction, latent = model(batch)
-            loss = criterion(reconstruction, batch)
-            loss.backward()
+            output = model(batch)
+
+            # Handle tuple return (reconstruction, latent)
+            if isinstance(output, tuple):
+                reconstruction, latent = output
+            else:
+                reconstruction = output
+                latent = model.encode(batch) if hasattr(model, 'encode') else None
+
+            # Reconstruction loss
+            recon_loss = criterion(reconstruction, batch)
+            total_loss = recon_loss
+
+            # Contrastive loss (Phase 2)
+            contr_loss_val = 0.0
+            if use_contrastive and contrastive_loss_fn is not None and batch_labels is not None and latent is not None:
+                # Get mean latent representation for contrastive
+                if latent.dim() == 3:  # (batch, time, hidden)
+                    latent_mean = latent.mean(dim=1)  # (batch, hidden)
+                else:
+                    latent_mean = latent
+                contr_loss = contrastive_loss_fn(latent_mean, batch_labels)
+                total_loss = (1 - contrastive_weight) * recon_loss + contrastive_weight * contr_loss
+                contr_loss_val = contr_loss.item()
+
+            total_loss.backward()
+
+            # Gradient clipping
+            torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
+
             optimizer.step()
 
-            epoch_loss += loss.item()
+            epoch_loss += total_loss.item()
+            epoch_recon += recon_loss.item()
+            epoch_contr += contr_loss_val
+            n_batches += 1
 
-        avg_loss = epoch_loss / len(dataloader)
+        avg_loss = epoch_loss / n_batches
+        avg_recon = epoch_recon / n_batches
+        avg_contr = epoch_contr / n_batches
         losses.append(avg_loss)
 
         if verbose and (epoch + 1) % 10 == 0:
-            tqdm.write(f"Epoch {epoch+1}/{n_epochs}: loss = {avg_loss:.4f}")
+            if use_contrastive:
+                tqdm.write(f"Epoch {epoch+1}/{n_epochs}: loss={avg_loss:.4f} recon={avg_recon:.4f} contr={avg_contr:.4f}")
+            else:
+                tqdm.write(f"Epoch {epoch+1}/{n_epochs}: loss={avg_loss:.4f}")
 
     model.eval()
     return model
+
+
+class ContrastiveLoss(nn.Module):
+    """Supervised contrastive loss for learning discriminative representations."""
+
+    def __init__(self, temperature: float = 0.07, mode: str = "condition"):
+        super().__init__()
+        self.temperature = temperature
+        self.mode = mode
+
+    def forward(self, embeddings: torch.Tensor, labels: torch.Tensor) -> torch.Tensor:
+        """Compute supervised contrastive loss."""
+        batch_size = embeddings.shape[0]
+        if batch_size < 2:
+            return torch.tensor(0.0, device=embeddings.device, requires_grad=True)
+
+        # L2 normalize embeddings
+        embeddings = nn.functional.normalize(embeddings, dim=1, eps=1e-8)
+
+        # Compute similarity matrix
+        sim_matrix = torch.mm(embeddings, embeddings.t()) / self.temperature
+
+        # Create mask for positive pairs (same label)
+        labels = labels.view(-1, 1)
+        mask = torch.eq(labels, labels.t()).float()
+
+        # Remove diagonal (self-similarity)
+        diag_mask = torch.eye(batch_size, device=mask.device)
+        mask = mask - diag_mask
+
+        # Count positive pairs for each sample
+        pos_count = mask.sum(dim=1)
+        valid_samples = pos_count > 0
+
+        if not valid_samples.any():
+            return torch.tensor(0.0, device=embeddings.device, requires_grad=True)
+
+        # For numerical stability
+        sim_max, _ = sim_matrix.max(dim=1, keepdim=True)
+        sim_matrix = sim_matrix - sim_max.detach()
+
+        # Compute exp(sim) with self-similarity zeroed out
+        exp_sim = torch.exp(sim_matrix) * (1 - diag_mask)
+        sum_exp = exp_sim.sum(dim=1) + 1e-8
+        pos_exp_sum = (exp_sim * mask).sum(dim=1)
+
+        loss_per_sample = -torch.log(pos_exp_sum / sum_exp + 1e-8)
+        loss = loss_per_sample[valid_samples].mean()
+        return torch.clamp(loss, min=0.0, max=100.0)
 
 
 def compute_latent_trajectory(
@@ -1246,6 +1408,9 @@ def main():
     parser.add_argument("--quick", action="store_true", help="Quick test (fewer epochs)")
     parser.add_argument("--no-show", action="store_true", help="Don't display plots")
     parser.add_argument("--seed", type=int, default=42, help="Random seed")
+    parser.add_argument("--two-phase", action="store_true", help="Enable two-phase training (reconstruction then contrastive)")
+    parser.add_argument("--transformer", action="store_true", help="Use TransformerAutoencoder instead of SimulationAutoencoder")
+    parser.add_argument("--contrastive-weight", type=float, default=0.15, help="Weight for contrastive loss in phase 2")
     args = parser.parse_args()
 
     # Create output directory
@@ -1261,20 +1426,35 @@ def main():
     print()
 
     # Parameters
-    n_epochs = 20 if args.quick else 100  # More epochs for better learning
+    n_epochs_phase1 = 20 if args.quick else 100  # Phase 1: reconstruction
+    n_epochs_phase2 = 10 if args.quick else 50   # Phase 2: contrastive (shorter)
     hidden_size = 64  # Larger hidden size for more representational capacity
+    use_two_phase = args.two_phase
+    use_transformer = args.transformer
 
     # Save parameters
     params = {
         "seed": args.seed,
-        "n_epochs": n_epochs,
+        "n_epochs_phase1": n_epochs_phase1,
+        "n_epochs_phase2": n_epochs_phase2 if use_two_phase else 0,
         "hidden_size": hidden_size,
         "n_channels": N_CHANNELS,
         "sfreq": SFREQ,
         "chunk_duration": CHUNK_DURATION,
         "total_duration": TOTAL_DURATION,
         "device": DEVICE,
+        "two_phase": use_two_phase,
+        "transformer": use_transformer,
+        "contrastive_weight": args.contrastive_weight if use_two_phase else 0,
     }
+
+    if use_two_phase:
+        print(f"Two-phase training ENABLED:")
+        print(f"  Phase 1: {n_epochs_phase1} epochs (reconstruction only)")
+        print(f"  Phase 2: {n_epochs_phase2} epochs (contrastive, weight={args.contrastive_weight})")
+    if use_transformer:
+        print(f"Using TransformerAutoencoder")
+    print()
     with open(output_dir / "parameters.json", "w") as f:
         json.dump(params, f, indent=2)
 
@@ -1312,21 +1492,86 @@ def main():
     )
     print(f"  Phase data shape: {phase_data_sim1.shape}")
 
-    # Chunk data
+    # Chunk data with regime labels
     chunk_samples = int(CHUNK_DURATION * SFREQ)
     chunks_sim1 = chunk_phase_data(phase_data_sim1, chunk_samples)
     print(f"  Number of chunks: {len(chunks_sim1)}")
 
-    # Train model
-    print(f"\nTraining autoencoder ({n_epochs} epochs)...")
+    # Get regime labels for each chunk (use majority label per chunk)
+    chunk_labels_sim1 = []
+    for i, chunk in enumerate(chunks_sim1):
+        start_sample = i * chunk_samples
+        end_sample = start_sample + chunk_samples
+        if end_sample <= len(sim1_result.regime_labels):
+            chunk_regime = sim1_result.regime_labels[start_sample:end_sample]
+            majority_label = int(np.bincount(chunk_regime).argmax())
+            chunk_labels_sim1.append(majority_label)
+        else:
+            chunk_labels_sim1.append(0)  # Fallback
+
+    # === PHASE 1: Reconstruction ===
+    print(f"\n--- Phase 1: Training autoencoder ({n_epochs_phase1} epochs) ---")
     model_sim1 = train_simulation_model(
         chunks_sim1,
         n_channels=N_CHANNELS,
         hidden_size=hidden_size,
-        n_epochs=n_epochs,
+        n_epochs=n_epochs_phase1,
         device=DEVICE,
         verbose=True,
+        labels=chunk_labels_sim1,
+        use_contrastive=False,
+        use_transformer=use_transformer,
     )
+
+    # === PHASE 2: Contrastive (optional) ===
+    if use_two_phase:
+        print(f"\n--- Phase 2: Contrastive fine-tuning ({n_epochs_phase2} epochs) ---")
+        # Continue training with contrastive loss
+        # Note: We reuse the same model (weights preserved)
+        model_sim1.train()
+        optimizer = torch.optim.AdamW(model_sim1.parameters(), lr=1e-4)  # Lower LR for fine-tuning
+        criterion = nn.MSELoss()
+        contrastive_loss_fn = ContrastiveLoss(temperature=0.07, mode="condition")
+
+        data = torch.stack([torch.from_numpy(c) for c in chunks_sim1])
+        label_tensor = torch.tensor(chunk_labels_sim1, dtype=torch.long)
+        dataset = TensorDataset(data, label_tensor)
+        dataloader = DataLoader(dataset, batch_size=16, shuffle=True)
+
+        for epoch in tqdm(range(n_epochs_phase2), desc="Phase 2 (Contrastive)"):
+            epoch_loss = 0.0
+            epoch_recon = 0.0
+            epoch_contr = 0.0
+            n_batches = 0
+
+            for batch, batch_labels in dataloader:
+                batch = batch.float().to(DEVICE)
+                batch_labels = batch_labels.to(DEVICE)
+
+                optimizer.zero_grad()
+                output = model_sim1(batch)
+                reconstruction, latent = output if isinstance(output, tuple) else (output, model_sim1.encode(batch))
+
+                recon_loss = criterion(reconstruction, batch)
+
+                # Contrastive on mean latent
+                latent_mean = latent.mean(dim=1) if latent.dim() == 3 else latent
+                contr_loss = contrastive_loss_fn(latent_mean, batch_labels)
+
+                total_loss = (1 - args.contrastive_weight) * recon_loss + args.contrastive_weight * contr_loss
+                total_loss.backward()
+                torch.nn.utils.clip_grad_norm_(model_sim1.parameters(), 1.0)
+                optimizer.step()
+
+                epoch_loss += total_loss.item()
+                epoch_recon += recon_loss.item()
+                epoch_contr += contr_loss.item()
+                n_batches += 1
+
+            if (epoch + 1) % 10 == 0:
+                tqdm.write(f"Epoch {epoch+1}/{n_epochs_phase2}: loss={epoch_loss/n_batches:.4f} recon={epoch_recon/n_batches:.4f} contr={epoch_contr/n_batches:.4f}")
+
+        model_sim1.eval()
 
     # Save model (to output dir, NOT models/)
     model_path = output_dir / "simulation1_model.pt"
@@ -1420,22 +1665,70 @@ def main():
     phase_stable = observations_to_phase_representation(stable_result.observations, SFREQ)
     phase_exploratory = observations_to_phase_representation(exploratory_result.observations, SFREQ)
 
-    # Chunk and combine for training
+    # Chunk and combine for training with labels
     chunks_stable = chunk_phase_data(phase_stable, chunk_samples)
     chunks_exploratory = chunk_phase_data(phase_exploratory, chunk_samples)
     all_chunks_sim2 = chunks_stable + chunks_exploratory
+    # Labels: 0 = stable, 1 = exploratory
+    labels_sim2 = [0] * len(chunks_stable) + [1] * len(chunks_exploratory)
     print(f"  Total chunks: {len(all_chunks_sim2)}")
+    print(f"  Stable chunks: {len(chunks_stable)}, Exploratory chunks: {len(chunks_exploratory)}")
 
-    # Train joint model
-    print(f"\nTraining joint autoencoder ({n_epochs} epochs)...")
+    # === PHASE 1: Reconstruction ===
+    print(f"\n--- Phase 1: Training joint autoencoder ({n_epochs_phase1} epochs) ---")
     model_sim2 = train_simulation_model(
         all_chunks_sim2,
         n_channels=N_CHANNELS,
         hidden_size=hidden_size,
-        n_epochs=n_epochs,
+        n_epochs=n_epochs_phase1,
         device=DEVICE,
         verbose=True,
+        labels=labels_sim2,
+        use_contrastive=False,
+        use_transformer=use_transformer,
     )
+
+    # === PHASE 2: Contrastive (optional) ===
+    if use_two_phase:
+        print(f"\n--- Phase 2: Contrastive fine-tuning ({n_epochs_phase2} epochs) ---")
+        model_sim2.train()
+        optimizer = torch.optim.AdamW(model_sim2.parameters(), lr=1e-4)
+        criterion = nn.MSELoss()
+        contrastive_loss_fn = ContrastiveLoss(temperature=0.07, mode="condition")
+
+        data = torch.stack([torch.from_numpy(c) for c in all_chunks_sim2])
+        label_tensor = torch.tensor(labels_sim2, dtype=torch.long)
+        dataset = TensorDataset(data, label_tensor)
+        dataloader = DataLoader(dataset, batch_size=16, shuffle=True)
+
+        for epoch in tqdm(range(n_epochs_phase2), desc="Phase 2 (Contrastive)"):
+            epoch_loss = 0.0
+            n_batches = 0
+
+            for batch, batch_labels in dataloader:
+                batch = batch.float().to(DEVICE)
+                batch_labels = batch_labels.to(DEVICE)
+
+                optimizer.zero_grad()
+                output = model_sim2(batch)
+                reconstruction, latent = output if isinstance(output, tuple) else (output, model_sim2.encode(batch))
+
+                recon_loss = criterion(reconstruction, batch)
+                latent_mean = latent.mean(dim=1) if latent.dim() == 3 else latent
+                contr_loss = contrastive_loss_fn(latent_mean, batch_labels)
+
+                total_loss = (1 - args.contrastive_weight) * recon_loss + args.contrastive_weight * contr_loss
+                total_loss.backward()
+                torch.nn.utils.clip_grad_norm_(model_sim2.parameters(), 1.0)
+                optimizer.step()
+
+                epoch_loss += total_loss.item()
+                n_batches += 1
+
+            if (epoch + 1) % 10 == 0:
+                tqdm.write(f"Epoch {epoch+1}/{n_epochs_phase2}: loss={epoch_loss/n_batches:.4f}")
+
+        model_sim2.eval()
 
     # Save model
     model_path_sim2 = output_dir / "simulation2_model.pt"
@@ -1458,6 +1751,12 @@ def main():
 
     embedded_stable = embedder_sim2.transform(latent_stable)
     embedded_exploratory = embedder_sim2.transform(latent_exploratory)
+
+    # CENTER BOTH EMBEDDINGS at origin for visualization
+    # This ensures both attractors are displayed at the same position
+    # so we can compare their SHAPES (blob vs ring) directly
+    embedded_stable = embedded_stable - embedded_stable.mean(axis=0)
+    embedded_exploratory = embedded_exploratory - embedded_exploratory.mean(axis=0)
 
     # Compute metrics
     print("\nComputing flow metrics...")
