@@ -1,0 +1,83 @@
+# Optimized Meditation Dataset Configuration
+# OpenNeuro ds001787: Expert vs Novice Meditators
+#
+# Key improvements over default:
+# - 10s windows (matches original paper methodology)
+# - 50% overlap for smooth coverage
+# - Subject-balanced sampling
+# - CSD reference for better spatial localization
+#
+# Use with: python -m eeg_biomarkers.training.train \
+#     data=meditation_optimized \
+#     model=transformer_v2 \
+#     training=optimized \
+#     paths.data_dir=/path/to/ds001787
+
+# Dataset type
+dataset: "meditation_bids"
+
+# Groups determined from participants.tsv
+# Expert meditators (12 subjects) vs Novice (12 subjects)
+groups:
+  - name: "expert"
+    label: 0
+    path: "."
+  - name: "novice"
+    label: 1
+    path: "."
+
+# =============================================================================
+# PREPROCESSING
+# =============================================================================
+preprocessing:
+  # Filtering - paper used 2 Hz high-pass, we use 3 Hz for consistency
+  filter_low: 3.0   # Hz (excludes slow drift)
+  filter_high: 48.0  # Hz (below line noise, includes gamma)
+  notch_freq: 50.0  # Line noise removal (50 Hz for Europe)
+
+  # Referencing - CSD for better spatial localization
+  # Note: Original paper used average reference
+  reference: "csd"
+
+  # =============================================================================
+  # CHUNKING - 10s windows with 50% overlap
+  # =============================================================================
+  # Original paper: 10s epochs before probes
+  # We use 10s to capture full metastable dwell times
+  chunk_duration: 10.0  # seconds
+  chunk_overlap: 5.0    # seconds (50% overlap)
+
+  # Phase extraction
+  phase_method: "hilbert"
+
+# =============================================================================
+# SAMPLING - SUBJECT BALANCED
+# =============================================================================
+sampling:
+  n_subjects_per_group: null  # Use all 12 per group
+  random_seed: 42
+
+  # Subject-balanced sampling: equal windows per subject per epoch
+  subject_balanced: true
+
+  # Robust normalization per recording
+  normalize_per_recording: true
+
+  # Memory mode: preload to RAM for faster training
+  preload_to_ram: true
+
+# =============================================================================
+# SPLITTING
+# =============================================================================
+splitting:
+  method: "group_kfold"  # Prevents segment-level leakage
+  n_splits: 5
+  test_size: 0.2
+  group_by: "subject"
+
+# =============================================================================
+# CACHING
+# =============================================================================
+caching:
+  enabled: true
+  cache_dir: "preprocessed_meditation_10s"  # Separate cache for meditation

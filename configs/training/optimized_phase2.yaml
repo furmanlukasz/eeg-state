@@ -1,0 +1,118 @@
+# Phase 2 Training Configuration - Contrastive Learning
+#
+# Use AFTER Phase 1 reconstruction training is complete.
+# This adds contrastive loss to learn condition-discriminative representations.
+#
+# Prerequisites:
+# - Phase 1 training complete (good reconstruction, val_loss < 0.5)
+# - Best checkpoint saved from Phase 1
+#
+# Use with: python -m eeg_biomarkers.training.train \
+#     training=optimized_phase2 \
+#     model=transformer_v2 \
+#     data=optimized_all \
+#     +training.resume_from="outputs/<run_name>/checkpoints/best.pt"
+
+# Resume from Phase 1 checkpoint (set via command line)
+resume_from: null
+
+# Training loop - shorter since we're fine-tuning
+epochs: 150
+batch_size: 64  # Can use larger batch for contrastive
+gradient_accumulation_steps: 1
+
+# Gradient clipping
+gradient_clip_norm: 1.0
+
+# Early stopping - tighter for fine-tuning
+early_stopping:
+  enabled: true
+  patience: 25
+  min_delta: 0.0005
+  monitor: "val_loss"
+
+# Checkpointing
+checkpointing:
+  enabled: true
+  save_every_n_epochs: 10
+  save_best: true
+  save_last: true
+
+# Optimizer - lower LR for fine-tuning
+optimizer:
+  name: "adamw"
+  lr: 0.0001  # Lower than phase 1 (0.0003)
+  weight_decay: 0.01
+  betas: [0.9, 0.999]
+
+# Learning rate scheduler
+scheduler:
+  name: "cosine"
+  warmup_epochs: 5  # Less warmup for fine-tuning
+  min_lr: 0.000001
+  factor: 0.5
+  patience: 10
+
+# Loss function
+loss:
+  name: "geometric"
+
+# =============================================================================
+# RECONSTRUCTION LOSS (keep from Phase 1)
+# =============================================================================
+lambda_phase: 1.0
+lambda_amplitude: 0.25
+lambda_unit_circle: 0.1
+lambda_angle: 0.1
+lambda_derivative: 0.05
+lambda_derivative2: 0.0
+
+# Total reconstruction weight - scale down slightly to balance with contrastive
+lambda_reconstruction: 0.8
+
+# =============================================================================
+# CONTRASTIVE LOSS - ENABLED FOR PHASE 2
+# =============================================================================
+
+# Contrastive loss: pulls same-condition samples together, pushes different apart
+# Recommended: 0.1-0.2
+lambda_contrastive: 0.15
+
+# Triplet loss (optional, can use in addition to contrastive)
+# Recommended: 0.0-0.1
+lambda_triplet: 0.0
+
+# Temperature for contrastive loss (lower = sharper distribution)
+contrastive_temperature: 0.07
+
+# Triplet margin (if using triplet loss)
+triplet_margin: 0.5
+
+# Contrastive mode: "condition" groups by HC/MCI/AD label
+contrastive_mode: "condition"
+
+# =============================================================================
+# REGULARIZATION
+# =============================================================================
+regularization:
+  label_smoothing: 0.0
+  mixup_alpha: 0.0
+
+# Validation
+validation:
+  enabled: true
+  frequency: 1
+  subset_fraction: null
+
+# =============================================================================
+# MIXED PRECISION
+# =============================================================================
+mixed_precision:
+  enabled: true
+
+# =============================================================================
+# SUBJECT-BALANCED SAMPLING
+# =============================================================================
+sampling:
+  subject_balanced: true
+  shuffle_subjects: true

@@ -141,6 +141,18 @@ def main(cfg: DictConfig) -> None:
         trainer = Trainer(model, cfg, device=cfg.experiment.device)
         logger.info("Using standard Trainer")
 
+    # Resume from checkpoint if specified
+    resume_from = getattr(cfg.training, 'resume_from', None)
+    if resume_from:
+        resume_path = Path(resume_from)
+        if resume_path.exists():
+            logger.info(f"Resuming from checkpoint: {resume_path}")
+            checkpoint = torch.load(resume_path, map_location=cfg.experiment.device, weights_only=False)
+            model.load_state_dict(checkpoint["model_state_dict"])
+            logger.info("Model weights loaded from checkpoint")
+        else:
+            logger.warning(f"Checkpoint not found: {resume_path}, starting from scratch")
+
     # Train
     logger.info("Starting training...")
     history = trainer.fit(
