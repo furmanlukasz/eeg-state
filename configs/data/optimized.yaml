@@ -58,6 +58,12 @@ sampling:
   # Handles amplitude range differences across subjects
   normalize_per_recording: true
 
+  # Memory mode for large datasets:
+  # - true (default on GPU): preload all data into RAM (fast training, ~30-50GB RAM)
+  # - false: on-demand loading with LRU cache (slower but memory-efficient)
+  # Set to false if running out of RAM
+  preload_to_ram: true
+
 # =============================================================================
 # SPLITTING
 # =============================================================================

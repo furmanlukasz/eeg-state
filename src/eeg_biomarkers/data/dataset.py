@@ -476,15 +476,25 @@ class EEGDataModule:
         # Use preloading dataset for fast training on any GPU (MPS or CUDA)
         # This loads all data into RAM once, then training is fast
         # On CPU-only, use the older ConcatDataset approach
-        use_preload = torch.backends.mps.is_available() or torch.cuda.is_available()
-        if use_preload:
-            device_name = "MPS" if torch.backends.mps.is_available() else "CUDA"
-            logger.info(f"Using preloaded dataset for fast training ({device_name} detected)")
+        # Can be disabled via config: data.sampling.preload_to_ram=false
+        preload_config = self.cfg.data.get("sampling", {}).get("preload_to_ram", None)
+        if preload_config is not None:
+            # Explicit config setting takes precedence
+            use_preload = preload_config
+            if use_preload:
+                logger.info("Using preloaded dataset (preload_to_ram=true)")
+            else:
+                logger.info("Using on-demand loading with LRU cache (preload_to_ram=false)")
+        else:
+            # Auto-detect: preload on GPU, on-demand on CPU
+            use_preload = torch.backends.mps.is_available() or torch.cuda.is_available()
+            if use_preload:
+                device_name = "MPS" if torch.backends.mps.is_available() else "CUDA"
+                logger.info(f"Using preloaded dataset for fast training ({device_name} detected)")
 
         def build_dataset(subjects: list[str], desc: str) -> Dataset:
             """Build dataset for a set of subjects, using cache."""
-            file_infos: list[tuple[Path, int, str]] = []  # For memory-efficient mode
-            datasets = []  # For standard mode
+            file_infos: list[tuple[Path, int, str]] = []
             n_cached = 0
             n_processed = 0
             n_failed = 0
@@ -520,30 +530,19 @@ class EEGDataModule:
                             n_failed += 1
                             continue
 
-                    # Add to appropriate structure
-                    if use_preload:
-                        file_infos.append((cache_path, label, subject_id))
-                    else:
-                        try:
-                            ds = CachedFileDataset(cache_path, label, subject_id)
-                            datasets.append(ds)
-                        except Exception as e:
-                            logger.warning(f"Failed to load cache {cache_path}: {e}")
-                            n_failed += 1
+                    # Add to file_infos for MemoryEfficientConcatDataset
+                    file_infos.append((cache_path, label, subject_id))
 
             logger.info(
                 f"{desc}: {n_cached} cached, {n_processed} processed, {n_failed} failed"
             )
 
-            if use_preload:
-                if not file_infos:
-                    raise RuntimeError(f"No data loaded for {desc}!")
-                return MemoryEfficientConcatDataset(file_infos)
-            else:
-                if not datasets:
-                    raise RuntimeError(f"No data loaded for {desc}!")
-                logger.info(f"{desc}: {sum(len(d) for d in datasets)} total chunks")
-                return ConcatDataset(datasets)
+            # Always use MemoryEfficientConcatDataset - it supports both modes:
+            # - preload=True: loads all data into RAM (fast training, high memory)
+            # - preload=False: LRU cache on-demand loading (slower but memory-efficient)
+            if not file_infos:
+                raise RuntimeError(f"No data loaded for {desc}!")
+            return MemoryEfficientConcatDataset(file_infos, preload=use_preload)
 
         self.train_dataset = build_dataset(train_subjects, "train")
         self.val_dataset = build_dataset(val_subjects, "val")
