@@ -45,43 +45,25 @@ class CachedFileDataset(Dataset):
     """
     Dataset that loads preprocessed chunks from a single cached .pt file.
 
-    Each file is preprocessed once and saved as a tensor file.
-    Uses lazy loading to avoid loading all data into memory at once.
+    Keeps file data loaded while being accessed, but can be evicted
+    by the ConcatDataset wrapper to control memory.
     """
 
-    def __init__(self, cache_path: Path, label: int, subject_id: str, lazy: bool = True):
+    def __init__(self, cache_path: Path, label: int, subject_id: str):
         self.cache_path = cache_path
         self.label = label
         self.subject_id = subject_id
-        self.lazy = lazy
 
-        if lazy:
-            # Only load metadata - actual data loaded on demand
-            data = torch.load(cache_path, weights_only=True)
-            self._len = len(data["chunks"])
-            self._chunks = None
-            self._masks = None
-            del data  # Free memory immediately
-        else:
-            # Load cached data fully (original behavior)
-            data = torch.load(cache_path, weights_only=True)
-            self._chunks = data["chunks"]  # (n_chunks, features, time)
-            self._masks = data["masks"]    # (n_chunks, time)
-            self._len = len(self._chunks)
-
-    def _load_data(self) -> None:
-        """Lazily load data when first accessed."""
-        if self._chunks is None:
-            data = torch.load(self.cache_path, weights_only=True)
-            self._chunks = data["chunks"]
-            self._masks = data["masks"]
+        # Only load to get length, then free
+        data = torch.load(cache_path, weights_only=True)
+        self._len = len(data["chunks"])
+        self._chunks = data["chunks"]
+        self._masks = data["masks"]
 
     def __len__(self) -> int:
         return self._len
 
     def __getitem__(self, idx: int) -> dict:
-        if self.lazy and self._chunks is None:
-            self._load_data()
         return {
             "data": self._chunks[idx],
             "mask": self._masks[idx],
