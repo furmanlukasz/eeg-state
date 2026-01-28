@@ -571,20 +571,33 @@ class EEGDataModule:
         use_mps = torch.backends.mps.is_available()
         use_cuda = torch.cuda.is_available()
 
+        # Check if using ConcatDataset (on-demand) vs preloaded
+        # ConcatDataset with workers causes OOM because each worker
+        # loads files into memory independently
+        using_concat = isinstance(self.train_dataset, ConcatDataset)
+
         if use_mps:
             # MPS: No pin_memory, fewer workers to avoid memory duplication
             return {
-                "num_workers": 0,  # Main process only - avoids memory copies
+                "num_workers": 0,
                 "pin_memory": False,
                 "persistent_workers": False,
             }
         elif use_cuda:
-            # CUDA: Full optimization
-            return {
-                "num_workers": 4,
-                "pin_memory": True,
-                "persistent_workers": True,
-            }
+            if using_concat:
+                # ConcatDataset: use main process to avoid OOM from worker copies
+                return {
+                    "num_workers": 0,
+                    "pin_memory": True,
+                    "persistent_workers": False,
+                }
+            else:
+                # Preloaded: workers are fine, data is already in RAM
+                return {
+                    "num_workers": 4,
+                    "pin_memory": True,
+                    "persistent_workers": True,
+                }
         else:
             # CPU: Moderate workers
             return {
