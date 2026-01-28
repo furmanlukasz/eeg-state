@@ -1,0 +1,48 @@
+# Transformer v3 model configuration - Medium capacity
+# Balanced between v1 (small) and v2 (large)
+#
+# Architecture:
+# - 6 transformer layers (same as v2)
+# - 256 hidden size / d_model (medium)
+# - 8 attention heads (256/8 = 32 head dim)
+# - 512 feedforward (2x d_model)
+# - 64 latent dimension (same as v1/v2)
+#
+# Use with: python -m eeg_biomarkers.training.train model=transformer_v3
+
+name: "transformer_autoencoder"
+
+encoder:
+  # Conv layers before transformer (0-3)
+  complexity: 2
+
+  # Hidden size / d_model - main transformer dimension
+  hidden_size: 256
+
+  # Dropout for regularization
+  dropout: 0.1
+
+  # Transformer layers - deeper than v1
+  n_transformer_layers: 6
+
+  # Attention heads - 256/8 = 32 head dimension
+  n_heads: 8
+
+  # Feedforward dimension (2x d_model)
+  dim_feedforward: 512
+
+decoder:
+  use_encoder_config: true
+  constrain_output: true
+
+# Recurrence matrix settings
+recurrence:
+  threshold_method: "rr_controlled"
+  target_rr: 0.02
+  fixed_epsilon: null
+
+# Phase representation with AMPLITUDE
+phase:
+  representation: "circular"
+  include_amplitude: true
+  normalize_amplitude: true
