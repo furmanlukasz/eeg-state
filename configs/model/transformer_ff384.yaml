@@ -1,0 +1,28 @@
+# Transformer model configuration - increased feedforward dimension
+# Same as transformer.yaml but with dim_feedforward=384
+#
+# Use with: python -m eeg_biomarkers.training.train model=transformer_ff384
+
+name: "transformer_autoencoder"
+
+encoder:
+  complexity: 2
+  hidden_size: 64
+  dropout: 0.1
+  n_heads: 4
+  n_transformer_layers: 2
+  dim_feedforward: 384  # Increased from 256
+
+decoder:
+  use_encoder_config: true
+  constrain_output: true
+
+recurrence:
+  threshold_method: "rr_controlled"
+  target_rr: 0.02
+  fixed_epsilon: null
+
+phase:
+  representation: "circular"
+  include_amplitude: true
+  normalize_amplitude: true

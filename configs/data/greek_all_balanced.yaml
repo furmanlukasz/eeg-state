@@ -1,0 +1,47 @@
+# Greek dataset configuration - All 3 groups, balanced
+# MCI + HC + AD with equal number of subjects per group
+#
+# Use with: python -m eeg_biomarkers.training.train data=greek_all_balanced
+
+dataset: "greek_resting"
+
+# Data paths - all three groups
+groups:
+  - name: "HC"
+    label: 0
+    path: "HID/FILT"
+  - name: "MCI"
+    label: 1
+    path: "MCI/FILT"
+  - name: "AD"
+    label: 2
+    path: "AD/FILT"
+
+# Preprocessing
+preprocessing:
+  filter_low: 3.0
+  filter_high: 48.0
+  notch_freq: null
+  reference: "csd"
+  chunk_duration: 5.0
+  chunk_overlap: 0.0
+  phase_method: "hilbert"
+
+# Sampling - BALANCED: use smallest group size for all
+# AD typically has fewest subjects, so all groups will match AD count
+sampling:
+  n_subjects_per_group: 31  # Match smallest group (HC has ~31, AD has fewer)
+  random_seed: 42
+  balance_groups: true  # Equal subjects per group
+
+# Splitting
+splitting:
+  method: "group_kfold"
+  n_splits: 5
+  test_size: 0.2
+  group_by: "subject"
+
+# Caching
+caching:
+  enabled: true
+  cache_dir: "preprocessed_data_balanced"
