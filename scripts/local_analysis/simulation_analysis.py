@@ -25,6 +25,8 @@ Usage:
     python simulation_analysis.py                  # Full simulation
     python simulation_analysis.py --quick          # Quick test (fewer epochs)
     python simulation_analysis.py --no-show        # Don't display plots
+    python simulation_analysis.py --load-model path/to/model.pt  # Use pre-trained model
+    python simulation_analysis.py --embedding-sim1 pca --embedding-sim2 umap  # Override defaults
 
 Output:
     figures/paper1/fig02_simulations.pdf
@@ -54,7 +56,7 @@ from torch.utils.data import DataLoader, TensorDataset
 # Add src to path for model imports
 sys.path.insert(0, str(Path(__file__).parent.parent.parent / "src"))
 
-from eeg_biomarkers.models import ConvLSTMAutoencoder, TransformerAutoencoder
+from eeg_biomarkers.models import ConvLSTMAutoencoder
 
 # =============================================================================
 # CONFIGURATION
@@ -123,8 +125,9 @@ class MetastableSwitchingSystem:
         n_channels: int = 30,
         sfreq: float = 250.0,
         noise_std: float = 0.015,  # Low noise for clean basins
-        transition_prob: float = 0.0004,  # ~1 transition per 10s for balanced dwells (5-8s avg)
-        transition_smoothing: float = 0.5,  # Seconds to cross-fade between regimes
+        transition_prob: float = 0.0015,  # ~2.7s avg wait after min_dwell → ~4s total dwells
+        transition_smoothing: float = 0.3,  # Seconds to cross-fade between regimes
+        max_dwell: float = 8.0,  # Maximum dwell time in seconds (forced transition)
         seed: int = 42,
     ):
         self.n_regimes = n_regimes
@@ -134,6 +137,7 @@ class MetastableSwitchingSystem:
         self.noise_std = noise_std
         self.transition_prob = transition_prob
         self.transition_smoothing = transition_smoothing
+        self.max_dwell = max_dwell
         self.rng = np.random.RandomState(seed)
 
         # Create different dynamics matrices for each regime
@@ -153,39 +157,37 @@ class MetastableSwitchingSystem:
     def _create_regime_noise_scales(self) -> list[float]:
         """Create regime-specific noise scales for different activity levels."""
         return [
-            0.3,   # Regime 0: Low noise - quiet, stable
-            1.5,   # Regime 1: High noise - active, variable
-            0.8,   # Regime 2: Medium noise - moderate activity
+            0.1,   # Regime 0: Minimal noise - tight, stable point attractor
+            3.0,   # Regime 1: Very high noise - fast, noisy oscillations
+            1.0,   # Regime 2: Moderate noise - slow, broad wandering
         ][:self.n_regimes]
 
     def _create_regime_dynamics(self) -> list[np.ndarray]:
         """Create MAXIMALLY DISTINCT dynamical systems for each regime.
 
-        The key insight: for regimes to be separable in the autoencoder's latent space,
-        they need FUNDAMENTALLY DIFFERENT dynamics that create different trajectory
-        geometries. This means very different:
-        - Decay rates (how tightly confined vs exploratory)
-        - Rotation speeds (how fast the trajectory spirals)
-        - Noise sensitivity (how much they respond to perturbations)
+        Three qualitatively different dynamical regimes:
+        - Regime 0: Fixed-point attractor (strong decay, no rotation) → tight cluster
+        - Regime 1: Limit-cycle oscillator (weak decay, fast rotation) → spiraling ring
+        - Regime 2: Random walk (near-unit decay, no rotation) → diffusive cloud
 
-        These differences create distinct "fingerprints" in the phase-space that
-        the autoencoder learns to represent differently.
+        These produce fundamentally different trajectory geometries that
+        the autoencoder can distinguish even with short training.
         """
         dynamics = []
 
         for i in range(self.n_regimes):
             if i == 0:
-                # Regime 0: SLOW, STABLE - tight attractor, minimal movement
-                # Like a deep meditative state - very low activity
-                A = self._create_stable_dynamics(decay=0.5, rotation=0.02)
+                # Regime 0: FIXED POINT — strong decay pulls to center, no oscillation
+                # Produces a tight cluster in latent space
+                A = self._create_stable_dynamics(decay=0.3, rotation=0.0)
             elif i == 1:
-                # Regime 1: FAST, OSCILLATORY - rapid spiraling motion
-                # Like an alert, active state - high-frequency oscillations
-                A = self._create_stable_dynamics(decay=0.85, rotation=0.6)
+                # Regime 1: LIMIT CYCLE — weak decay + fast rotation = spiraling orbits
+                # Produces a ring/torus structure in latent space
+                A = self._create_stable_dynamics(decay=0.92, rotation=0.8)
             else:
-                # Regime 2: EXPLORATORY - weak attractor, wandering
-                # Like a transitional/searching state - broad exploration
-                A = self._create_stable_dynamics(decay=0.95, rotation=0.15)
+                # Regime 2: DIFFUSIVE — near-unit decay, very slow drift, no rotation
+                # Produces a broad, spread-out cloud in latent space
+                A = self._create_stable_dynamics(decay=0.98, rotation=0.02)
 
             dynamics.append(A)
 
@@ -209,37 +211,28 @@ class MetastableSwitchingSystem:
 
         for regime in range(self.n_regimes):
             # Very small base (near-zero for inactive channels)
-            M = self.rng.randn(self.n_channels, self.latent_dim) * 0.05
+            M = self.rng.randn(self.n_channels, self.latent_dim) * 0.02
 
             if regime == 0:
-                # Regime 0: GROUP 1 ACTIVE (frontal-like)
-                # Only first group has strong signal
-                M[group1, 0] = 3.0 + self.rng.randn(len(group1)) * 0.2
-                M[group1, 1] = 1.5 + self.rng.randn(len(group1)) * 0.2
-                M[group1, 2] = 0.8 + self.rng.randn(len(group1)) * 0.1
-                # Other groups: minimal (background noise level)
-                M[group2, :] *= 0.3
-                M[group3, :] *= 0.3
+                # Regime 0: GROUP 1 ACTIVE, LOW amplitude (matches tight attractor)
+                # Uniform coupling across latent dims → produces correlated channels
+                M[group1, 0] = 5.0 + self.rng.randn(len(group1)) * 0.1
+                M[group1, 1] = 5.0 + self.rng.randn(len(group1)) * 0.1
+                M[group1, 2] = 5.0 + self.rng.randn(len(group1)) * 0.1
 
             elif regime == 1:
-                # Regime 1: GROUP 2 ACTIVE (central-like)
-                # Only second group has strong signal
-                M[group2, 0] = 2.5 + self.rng.randn(len(group2)) * 0.2
-                M[group2, 1] = 2.0 + self.rng.randn(len(group2)) * 0.2
-                M[group2, 2] = 1.2 + self.rng.randn(len(group2)) * 0.1
-                # Other groups: minimal
-                M[group1, :] *= 0.3
-                M[group3, :] *= 0.3
+                # Regime 1: GROUP 2 ACTIVE, HIGH amplitude (matches oscillatory regime)
+                # Strong dim-0 coupling only → produces single dominant component
+                M[group2, 0] = 8.0 + self.rng.randn(len(group2)) * 0.3
+                M[group2, 1] = 0.5 + self.rng.randn(len(group2)) * 0.1
+                M[group2, 2] = 0.5 + self.rng.randn(len(group2)) * 0.1
 
             else:
-                # Regime 2: GROUP 3 ACTIVE (posterior-like)
-                # Only third group has strong signal
-                M[group3, 0] = 2.8 + self.rng.randn(len(group3)) * 0.2
-                M[group3, 1] = 1.8 + self.rng.randn(len(group3)) * 0.2
-                M[group3, 2] = 1.0 + self.rng.randn(len(group3)) * 0.1
-                # Other groups: minimal
-                M[group1, :] *= 0.3
-                M[group2, :] *= 0.3
+                # Regime 2: ALL GROUPS ACTIVE, moderate amplitude (matches diffusive regime)
+                # Spread across all channels → produces distributed activation
+                M[:, 0] = 2.0 + self.rng.randn(self.n_channels) * 0.3
+                M[:, 1] = 2.0 + self.rng.randn(self.n_channels) * 0.3
+                M[:, 2] = 2.0 + self.rng.randn(self.n_channels) * 0.3
 
             mixing_matrices.append(M)
 
@@ -315,14 +308,17 @@ class MetastableSwitchingSystem:
         pending_transition = None
         transition_progress = 0
         time_in_regime = 0
-        min_dwell_samples = int(3.0 * self.sfreq)  # Minimum 3 seconds per regime
+        min_dwell_samples = int(1.5 * self.sfreq)  # Minimum 1.5 seconds per regime (fits within 5s chunks)
+        max_dwell_samples = int(self.max_dwell * self.sfreq)  # Force transition after max dwell
 
         for t in range(1, n_samples):
             time_in_regime += 1
 
             # Check for new transition (only after minimum dwell)
             if pending_transition is None and time_in_regime > min_dwell_samples:
-                if self.rng.rand() < self.transition_prob:
+                # Force transition if max dwell exceeded, otherwise probabilistic
+                force = time_in_regime >= max_dwell_samples
+                if force or self.rng.rand() < self.transition_prob:
                     # Prefer transitions to less-visited regimes
                     visit_weights = 1.0 / (regime_visit_counts + 1)
                     visit_weights[current_regime] = 0  # Don't stay in same regime
@@ -682,14 +678,9 @@ def train_simulation_model(
     lr: float = 1e-3,
     device: str = "cpu",
     verbose: bool = True,
-    labels: list[int] | None = None,
-    use_contrastive: bool = False,
-    contrastive_weight: float = 0.15,
-    contrastive_temperature: float = 0.07,
-    use_transformer: bool = False,
 ) -> SimulationAutoencoder:
     """
-    Train an autoencoder on simulation data with optional two-phase training.
+    Train a lightweight autoencoder on simulation data.
 
     Args:
         chunks: List of (n_features, chunk_samples) arrays
@@ -700,57 +691,21 @@ def train_simulation_model(
         lr: Learning rate
         device: Device to train on
         verbose: Print progress
-        labels: Optional regime labels for contrastive learning
-        use_contrastive: Enable contrastive loss (Phase 2)
-        contrastive_weight: Weight for contrastive loss
-        contrastive_temperature: Temperature for contrastive softmax
-        use_transformer: Use TransformerAutoencoder instead of SimulationAutoencoder
 
     Returns:
         Trained model
     """
     # Create dataset
     data = torch.stack([torch.from_numpy(c) for c in chunks])  # (N, features, time)
-
-    if labels is not None:
-        label_tensor = torch.tensor(labels, dtype=torch.long)
-        dataset = TensorDataset(data, label_tensor)
-    else:
-        dataset = TensorDataset(data)
-
+    dataset = TensorDataset(data)
     dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=True)
 
     # Create model
-    if use_transformer:
-        from omegaconf import OmegaConf
-        model_cfg = OmegaConf.create({
-            'name': 'transformer_autoencoder',
-            'encoder': {
-                'hidden_size': hidden_size,
-                'num_layers': 2,
-                'nhead': 4,
-                'dim_feedforward': hidden_size * 2,
-                'dropout': 0.1,
-            },
-            'decoder': {
-                'hidden_size': hidden_size,
-                'num_layers': 2,
-                'nhead': 4,
-                'dim_feedforward': hidden_size * 2,
-                'dropout': 0.1,
-            },
-            'phase': {
-                'include_amplitude': True,
-            },
-        })
-        model = TransformerAutoencoder.from_config(model_cfg, n_channels)
-    else:
-        model = SimulationAutoencoder(
-            n_channels=n_channels,
-            hidden_size=hidden_size,
-            phase_channels=3,
-        )
-
+    model = SimulationAutoencoder(
+        n_channels=n_channels,
+        hidden_size=hidden_size,
+        phase_channels=3,
+    )
     model = model.to(device)
     model.train()
 
@@ -758,132 +713,62 @@ def train_simulation_model(
     optimizer = torch.optim.AdamW(model.parameters(), lr=lr)
     criterion = nn.MSELoss()
 
-    # Contrastive loss if enabled
-    contrastive_loss_fn = None
-    if use_contrastive and labels is not None:
-        contrastive_loss_fn = ContrastiveLoss(temperature=contrastive_temperature, mode="condition")
-
     # Training loop
     losses = []
-    phase_str = "Phase 2 (Contrastive)" if use_contrastive else "Phase 1 (Reconstruction)"
-    iterator = tqdm(range(n_epochs), desc=f"Training {phase_str}") if verbose else range(n_epochs)
+    iterator = tqdm(range(n_epochs), desc="Training") if verbose else range(n_epochs)
 
     for epoch in iterator:
         epoch_loss = 0.0
-        epoch_recon = 0.0
-        epoch_contr = 0.0
-        n_batches = 0
-
-        for batch_data in dataloader:
-            if labels is not None:
-                batch, batch_labels = batch_data
-                batch_labels = batch_labels.to(device)
-            else:
-                (batch,) = batch_data
-                batch_labels = None
-
+        for (batch,) in dataloader:
             batch = batch.float().to(device)
 
             optimizer.zero_grad()
-            output = model(batch)
-
-            # Handle tuple return (reconstruction, latent)
-            if isinstance(output, tuple):
-                reconstruction, latent = output
-            else:
-                reconstruction = output
-                latent = model.encode(batch) if hasattr(model, 'encode') else None
-
-            # Reconstruction loss
-            recon_loss = criterion(reconstruction, batch)
-            total_loss = recon_loss
-
-            # Contrastive loss (Phase 2)
-            contr_loss_val = 0.0
-            if use_contrastive and contrastive_loss_fn is not None and batch_labels is not None and latent is not None:
-                # Get mean latent representation for contrastive
-                if latent.dim() == 3:  # (batch, time, hidden)
-                    latent_mean = latent.mean(dim=1)  # (batch, hidden)
-                else:
-                    latent_mean = latent
-                contr_loss = contrastive_loss_fn(latent_mean, batch_labels)
-                total_loss = (1 - contrastive_weight) * recon_loss + contrastive_weight * contr_loss
-                contr_loss_val = contr_loss.item()
-
-            total_loss.backward()
-
-            # Gradient clipping
-            torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
-
+            reconstruction, latent = model(batch)
+            loss = criterion(reconstruction, batch)
+            loss.backward()
             optimizer.step()
 
-            epoch_loss += total_loss.item()
-            epoch_recon += recon_loss.item()
-            epoch_contr += contr_loss_val
-            n_batches += 1
+            epoch_loss += loss.item()
 
-        avg_loss = epoch_loss / n_batches
-        avg_recon = epoch_recon / n_batches
-        avg_contr = epoch_contr / n_batches
+        avg_loss = epoch_loss / len(dataloader)
         losses.append(avg_loss)
 
         if verbose and (epoch + 1) % 10 == 0:
-            if use_contrastive:
-                tqdm.write(f"Epoch {epoch+1}/{n_epochs}: loss={avg_loss:.4f} recon={avg_recon:.4f} contr={avg_contr:.4f}")
-            else:
-                tqdm.write(f"Epoch {epoch+1}/{n_epochs}: loss={avg_loss:.4f}")
+            tqdm.write(f"Epoch {epoch+1}/{n_epochs}: loss = {avg_loss:.4f}")
 
     model.eval()
     return model
 
 
-class ContrastiveLoss(nn.Module):
-    """Supervised contrastive loss for learning discriminative representations."""
+def load_simulation_model(
+    checkpoint_path: str,
+    device: str = "cpu",
+) -> SimulationAutoencoder:
+    """
+    Load a pre-trained SimulationAutoencoder from a checkpoint.
 
-    def __init__(self, temperature: float = 0.07, mode: str = "condition"):
-        super().__init__()
-        self.temperature = temperature
-        self.mode = mode
+    Args:
+        checkpoint_path: Path to .pt checkpoint file
+        device: Device to load model on
 
-    def forward(self, embeddings: torch.Tensor, labels: torch.Tensor) -> torch.Tensor:
-        """Compute supervised contrastive loss."""
-        batch_size = embeddings.shape[0]
-        if batch_size < 2:
-            return torch.tensor(0.0, device=embeddings.device, requires_grad=True)
+    Returns:
+        Loaded model in eval mode
+    """
+    checkpoint = torch.load(checkpoint_path, map_location=device, weights_only=False)
+    n_channels = checkpoint["n_channels"]
+    hidden_size = checkpoint["hidden_size"]
 
-        # L2 normalize embeddings
-        embeddings = nn.functional.normalize(embeddings, dim=1, eps=1e-8)
+    model = SimulationAutoencoder(
+        n_channels=n_channels,
+        hidden_size=hidden_size,
+        phase_channels=3,
+    )
+    model.load_state_dict(checkpoint["model_state_dict"])
+    model = model.to(device)
+    model.eval()
 
-        # Compute similarity matrix
-        sim_matrix = torch.mm(embeddings, embeddings.t()) / self.temperature
-
-        # Create mask for positive pairs (same label)
-        labels = labels.view(-1, 1)
-        mask = torch.eq(labels, labels.t()).float()
-
-        # Remove diagonal (self-similarity)
-        diag_mask = torch.eye(batch_size, device=mask.device)
-        mask = mask - diag_mask
-
-        # Count positive pairs for each sample
-        pos_count = mask.sum(dim=1)
-        valid_samples = pos_count > 0
-
-        if not valid_samples.any():
-            return torch.tensor(0.0, device=embeddings.device, requires_grad=True)
-
-        # For numerical stability
-        sim_max, _ = sim_matrix.max(dim=1, keepdim=True)
-        sim_matrix = sim_matrix - sim_max.detach()
-
-        # Compute exp(sim) with self-similarity zeroed out
-        exp_sim = torch.exp(sim_matrix) * (1 - diag_mask)
-        sum_exp = exp_sim.sum(dim=1) + 1e-8
-        pos_exp_sum = (exp_sim * mask).sum(dim=1)
-
-        loss_per_sample = -torch.log(pos_exp_sum / sum_exp + 1e-8)
-        loss = loss_per_sample[valid_samples].mean()
-        return torch.clamp(loss, min=0.0, max=100.0)
+    print(f"Loaded model from {checkpoint_path} (n_channels={n_channels}, hidden_size={hidden_size})")
+    return model
 
 
 def compute_latent_trajectory(
@@ -1137,22 +1022,23 @@ def create_simulation_figure(
     C) Estimated flow field + dwell density
     D) Metric comparison across regimes
     """
-    fig = plt.figure(figsize=(16, 12))
-    gs = GridSpec(2, 2, figure=fig, hspace=0.3, wspace=0.3)
+    # Layout: Row 1 = A (thin timeline spanning full width)
+    #         Row 2 = B, C, D (D is 2x2 subgrid)
+    fig = plt.figure(figsize=(20, 8))
+    gs = GridSpec(2, 3, figure=fig, hspace=0.35, wspace=0.35,
+                  height_ratios=[0.18, 1], width_ratios=[1, 1, 1.3])
 
-    # Colors for regimes - use highly distinct colors
+    # Colors for regimes
     n_regimes = len(set(sim_result.regime_labels))
-    # Blue, Red, Green - maximally distinct
     regime_colors = np.array([
         [0.2, 0.4, 0.8, 1.0],   # Blue (Regime 0)
         [0.9, 0.2, 0.2, 1.0],   # Red (Regime 1)
         [0.2, 0.7, 0.3, 1.0],   # Green (Regime 2)
     ])[:n_regimes]
 
-    # --- Panel A: Ground-truth regime timeline ---
-    ax_a = fig.add_subplot(gs[0, 0])
+    # --- Panel A: Ground-truth regime timeline (thin banner, full width) ---
+    ax_a = fig.add_subplot(gs[0, :])
 
-    # Create colored background for regimes
     for i in range(len(sim_result.time) - 1):
         regime = sim_result.regime_labels[i]
         ax_a.axvspan(
@@ -1160,7 +1046,6 @@ def create_simulation_figure(
             color=regime_colors[regime], alpha=0.7
         )
 
-    # Mark transitions
     for t_idx in sim_result.transition_times:
         t = sim_result.time[t_idx]
         ax_a.axvline(t, color='black', linestyle='--', linewidth=0.5, alpha=0.5)
@@ -1168,20 +1053,17 @@ def create_simulation_figure(
     ax_a.set_xlim(sim_result.time[0], sim_result.time[-1])
     ax_a.set_ylim(0, 1)
     ax_a.set_xlabel("Time (s)")
-    ax_a.set_ylabel("Regime")
     ax_a.set_title("A) Ground-Truth Regime Sequence", fontweight='bold')
     ax_a.set_yticks([])
 
-    # Legend
     handles = [plt.Rectangle((0,0),1,1, color=regime_colors[i], alpha=0.7)
                for i in range(n_regimes)]
     ax_a.legend(handles, [f"Regime {i}" for i in range(n_regimes)],
-                loc='upper right', ncol=n_regimes)
+                loc='center right', ncol=1, fontsize=8)
 
     # --- Panel B: Embedded trajectories colored by regime ---
-    ax_b = fig.add_subplot(gs[0, 1])
+    ax_b = fig.add_subplot(gs[1, 0])
 
-    # Downsample for visibility
     step = max(1, len(embedded_trajectory) // 5000)
     embedded_ds = embedded_trajectory[::step]
     labels_ds = sim_result.regime_labels[::step][:len(embedded_ds)]
@@ -1196,45 +1078,44 @@ def create_simulation_figure(
 
     ax_b.set_xlabel("Latent Dim 1")
     ax_b.set_ylabel("Latent Dim 2")
-    ax_b.set_title("B) Embedded Trajectories (colored by true regime)", fontweight='bold')
-    ax_b.legend(markerscale=5)
-    ax_b.set_aspect('equal')
+    ax_b.set_title("B) Embedded Trajectories", fontweight='bold')
+    ax_b.legend(markerscale=5, fontsize=8)
 
     # --- Panel C: Flow field + dwell density ---
-    ax_c = fig.add_subplot(gs[1, 0])
+    ax_c = fig.add_subplot(gs[1, 1])
 
-    # Compute density
     density = compute_density_on_grid(embedded_trajectory, embedder.bounds, bins=50)
 
-    # Compute flow field
     X, Y, flow_x, flow_y, counts = compute_flow_field(
         embedded_trajectory, embedder.bounds, grid_size=15
     )
 
-    # Plot density
     extent = list(embedder.bounds)
     im = ax_c.imshow(
         density, origin='lower', extent=extent,
-        cmap='Blues', alpha=0.7, aspect='equal'
+        cmap='Blues', alpha=0.7, aspect='auto'
     )
 
-    # Plot flow field
     magnitude = np.sqrt(flow_x**2 + flow_y**2)
-    mask = counts > 5
+    flow_mask = counts > 5
+    # Normalize arrows to unit length for visibility, color by magnitude
+    mag_masked = magnitude[flow_mask]
+    norm_fx = np.where(mag_masked > 0, flow_x[flow_mask] / mag_masked, 0)
+    norm_fy = np.where(mag_masked > 0, flow_y[flow_mask] / mag_masked, 0)
     ax_c.quiver(
-        X[mask], Y[mask], flow_x[mask], flow_y[mask],
-        magnitude[mask], cmap='Reds', alpha=0.8,
-        scale=None, width=0.003
+        X[flow_mask], Y[flow_mask], norm_fx, norm_fy,
+        mag_masked, cmap='inferno', alpha=0.85,
+        scale=25, width=0.004, headwidth=4, headlength=5,
+        clim=(np.percentile(mag_masked, 10), np.percentile(mag_masked, 90)),
     )
 
     ax_c.set_xlabel("Latent Dim 1")
     ax_c.set_ylabel("Latent Dim 2")
     ax_c.set_title("C) Dwell Density + Flow Field", fontweight='bold')
-    fig.colorbar(im, ax=ax_c, label='Density', shrink=0.8)
+    fig.colorbar(im, ax=ax_c, label='Density', shrink=0.7, pad=0.02)
 
-    # --- Panel D: Metric comparison across regimes (ACTUAL VALUES, no normalization) ---
-    # Create 2x2 subgrid for 4 metrics to show actual values clearly
-    gs_d = gs[1, 1].subgridspec(2, 2, hspace=0.4, wspace=0.3)
+    # --- Panel D: Metric comparison across regimes (2x2 subgrid) ---
+    gs_d = gs[1, 2].subgridspec(2, 2, hspace=0.55, wspace=0.45)
 
     metric_configs = [
         ("mean_speed", "Mean Speed", "Speed"),
@@ -1246,28 +1127,28 @@ def create_simulation_figure(
     regime_names_list = list(regime_metrics.keys())
     x = np.arange(len(regime_names_list))
 
-    for idx, (metric_name, title, ylabel) in enumerate(metric_configs):
+    for idx, (metric_name, metric_title, ylabel) in enumerate(metric_configs):
         ax_sub = fig.add_subplot(gs_d[idx // 2, idx % 2])
         values = [getattr(regime_metrics[r], metric_name) for r in regime_names_list]
 
         bars = ax_sub.bar(x, values, color=[regime_colors[i] for i in range(len(regime_names_list))], alpha=0.7)
         ax_sub.set_xticks(x)
-        ax_sub.set_xticklabels([f"R{i}" for i in range(len(regime_names_list))])
-        ax_sub.set_ylabel(ylabel, fontsize=8)
-        ax_sub.set_title(title, fontsize=9, fontweight='bold')
+        ax_sub.set_xticklabels([f"R{i}" for i in range(len(regime_names_list))], fontsize=7)
+        ax_sub.set_ylabel(ylabel, fontsize=7)
+        ax_sub.set_title(metric_title, fontsize=9, fontweight='bold')
+        ax_sub.tick_params(axis='both', labelsize=6)
 
-        # Add value labels on bars
+        # Pad ylim so value labels don't clip against the top frame
+        max_val = max(values) if values else 1
+        ax_sub.set_ylim(0, max_val * 1.25)
         for bar, val in zip(bars, values):
             height = bar.get_height()
             ax_sub.annotate(f'{val:.2f}',
                            xy=(bar.get_x() + bar.get_width() / 2, height),
-                           xytext=(0, 2), textcoords="offset points",
-                           ha='center', va='bottom', fontsize=7)
+                           xytext=(0, 3), textcoords="offset points",
+                           ha='center', va='bottom', fontsize=6)
 
-    # Add overall title for Panel D
-    fig.text(0.75, 0.48, "D) Flow Metrics by Regime", fontweight='bold', fontsize=10, ha='center')
-
-    fig.suptitle(title, fontsize=16, fontweight='bold', y=1.02)
+    fig.suptitle(title, fontsize=14, fontweight='bold', y=1.01)
 
     # Save
     output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -1408,9 +1289,12 @@ def main():
     parser.add_argument("--quick", action="store_true", help="Quick test (fewer epochs)")
     parser.add_argument("--no-show", action="store_true", help="Don't display plots")
     parser.add_argument("--seed", type=int, default=42, help="Random seed")
-    parser.add_argument("--two-phase", action="store_true", help="Enable two-phase training (reconstruction then contrastive)")
-    parser.add_argument("--transformer", action="store_true", help="Use TransformerAutoencoder instead of SimulationAutoencoder")
-    parser.add_argument("--contrastive-weight", type=float, default=0.15, help="Weight for contrastive loss in phase 2")
+    parser.add_argument("--load-model", type=str, default=None,
+                        help="Path to pre-trained model checkpoint (.pt) - skips training")
+    parser.add_argument("--embedding-sim1", type=str, default="umap", choices=["umap", "pca"],
+                        help="Embedding method for Simulation 1 (default: umap)")
+    parser.add_argument("--embedding-sim2", type=str, default="pca", choices=["umap", "pca"],
+                        help="Embedding method for Simulation 2 (default: pca)")
     args = parser.parse_args()
 
     # Create output directory
@@ -1423,38 +1307,29 @@ def main():
     print(f"=" * 60)
     print(f"Output directory: {output_dir}")
     print(f"Device: {DEVICE}")
+    if args.load_model:
+        print(f"Loading pre-trained model: {args.load_model}")
+    print(f"Embedding: Sim1={args.embedding_sim1}, Sim2={args.embedding_sim2}")
     print()
 
     # Parameters
-    n_epochs_phase1 = 20 if args.quick else 100  # Phase 1: reconstruction
-    n_epochs_phase2 = 10 if args.quick else 50   # Phase 2: contrastive (shorter)
-    hidden_size = 64  # Larger hidden size for more representational capacity
-    use_two_phase = args.two_phase
-    use_transformer = args.transformer
+    n_epochs = 20 if args.quick else 50
+    hidden_size = 32
 
     # Save parameters
     params = {
         "seed": args.seed,
-        "n_epochs_phase1": n_epochs_phase1,
-        "n_epochs_phase2": n_epochs_phase2 if use_two_phase else 0,
+        "n_epochs": n_epochs,
         "hidden_size": hidden_size,
         "n_channels": N_CHANNELS,
         "sfreq": SFREQ,
         "chunk_duration": CHUNK_DURATION,
         "total_duration": TOTAL_DURATION,
         "device": DEVICE,
-        "two_phase": use_two_phase,
-        "transformer": use_transformer,
-        "contrastive_weight": args.contrastive_weight if use_two_phase else 0,
+        "load_model": args.load_model,
+        "embedding_sim1": args.embedding_sim1,
+        "embedding_sim2": args.embedding_sim2,
     }
-
-    if use_two_phase:
-        print(f"Two-phase training ENABLED:")
-        print(f"  Phase 1: {n_epochs_phase1} epochs (reconstruction only)")
-        print(f"  Phase 2: {n_epochs_phase2} epochs (contrastive, weight={args.contrastive_weight})")
-    if use_transformer:
-        print(f"Using TransformerAutoencoder")
-    print()
     with open(output_dir / "parameters.json", "w") as f:
         json.dump(params, f, indent=2)
 
@@ -1492,93 +1367,32 @@ def main():
     )
     print(f"  Phase data shape: {phase_data_sim1.shape}")
 
-    # Chunk data with regime labels
+    # Chunk data
     chunk_samples = int(CHUNK_DURATION * SFREQ)
     chunks_sim1 = chunk_phase_data(phase_data_sim1, chunk_samples)
     print(f"  Number of chunks: {len(chunks_sim1)}")
 
-    # Get regime labels for each chunk (use majority label per chunk)
-    chunk_labels_sim1 = []
-    for i, chunk in enumerate(chunks_sim1):
-        start_sample = i * chunk_samples
-        end_sample = start_sample + chunk_samples
-        if end_sample <= len(sim1_result.regime_labels):
-            chunk_regime = sim1_result.regime_labels[start_sample:end_sample]
-            majority_label = int(np.bincount(chunk_regime).argmax())
-            chunk_labels_sim1.append(majority_label)
-        else:
-            chunk_labels_sim1.append(0)  # Fallback
-
-    # === PHASE 1: Reconstruction ===
-    print(f"\n--- Phase 1: Training autoencoder ({n_epochs_phase1} epochs) ---")
-    model_sim1 = train_simulation_model(
-        chunks_sim1,
-        n_channels=N_CHANNELS,
-        hidden_size=hidden_size,
-        n_epochs=n_epochs_phase1,
-        device=DEVICE,
-        verbose=True,
-        labels=chunk_labels_sim1,
-        use_contrastive=False,
-        use_transformer=use_transformer,
-    )
-
-    # === PHASE 2: Contrastive (optional) ===
-    if use_two_phase:
-        print(f"\n--- Phase 2: Contrastive fine-tuning ({n_epochs_phase2} epochs) ---")
-        # Continue training with contrastive loss
-        # Note: We reuse the same model (weights preserved)
-        model_sim1.train()
-        optimizer = torch.optim.AdamW(model_sim1.parameters(), lr=1e-4)  # Lower LR for fine-tuning
-        criterion = nn.MSELoss()
-        contrastive_loss_fn = ContrastiveLoss(temperature=0.07, mode="condition")
-
-        data = torch.stack([torch.from_numpy(c) for c in chunks_sim1])
-        label_tensor = torch.tensor(chunk_labels_sim1, dtype=torch.long)
-        dataset = TensorDataset(data, label_tensor)
-        dataloader = DataLoader(dataset, batch_size=16, shuffle=True)
-
-        for epoch in tqdm(range(n_epochs_phase2), desc="Phase 2 (Contrastive)"):
-            epoch_loss = 0.0
-            epoch_recon = 0.0
-            epoch_contr = 0.0
-            n_batches = 0
-
-            for batch, batch_labels in dataloader:
-                batch = batch.float().to(DEVICE)
-                batch_labels = batch_labels.to(DEVICE)
-
-                optimizer.zero_grad()
-                output = model_sim1(batch)
-                reconstruction, latent = output if isinstance(output, tuple) else (output, model_sim1.encode(batch))
-
-                recon_loss = criterion(reconstruction, batch)
-
-                # Contrastive on mean latent
-                latent_mean = latent.mean(dim=1) if latent.dim() == 3 else latent
-                contr_loss = contrastive_loss_fn(latent_mean, batch_labels)
-
-                total_loss = (1 - args.contrastive_weight) * recon_loss + args.contrastive_weight * contr_loss
-                total_loss.backward()
-                torch.nn.utils.clip_grad_norm_(model_sim1.parameters(), 1.0)
-                optimizer.step()
-
-                epoch_loss += total_loss.item()
-                epoch_recon += recon_loss.item()
-                epoch_contr += contr_loss.item()
-                n_batches += 1
-
-            if (epoch + 1) % 10 == 0:
-                tqdm.write(f"Epoch {epoch+1}/{n_epochs_phase2}: loss={epoch_loss/n_batches:.4f} recon={epoch_recon/n_batches:.4f} contr={epoch_contr/n_batches:.4f}")
-
-        model_sim1.eval()
+    # Train or load model
+    if args.load_model:
+        print(f"\nLoading pre-trained model...")
+        model_sim1 = load_simulation_model(args.load_model, DEVICE)
+    else:
+        print(f"\nTraining autoencoder ({n_epochs} epochs)...")
+        model_sim1 = train_simulation_model(
+            chunks_sim1,
+            n_channels=N_CHANNELS,
+            hidden_size=hidden_size,
+            n_epochs=n_epochs,
+            device=DEVICE,
+            verbose=True,
+        )
 
     # Save model (to output dir, NOT models/)
     model_path = output_dir / "simulation1_model.pt"
     torch.save({
         "model_state_dict": model_sim1.state_dict(),
         "n_channels": N_CHANNELS,
-        "hidden_size": hidden_size,
+        "hidden_size": hidden_size if not args.load_model else model_sim1.hidden_size,
     }, model_path)
     print(f"Saved model to: {model_path}")
 
@@ -1587,9 +1401,9 @@ def main():
     latent_sim1 = compute_latent_trajectory(model_sim1, phase_data_sim1, DEVICE)
     print(f"  Latent shape: {latent_sim1.shape}")
 
-    # Fit embedder and transform - try UMAP for better regime separation
-    print("\nFitting UMAP embedder for Simulation 1...")
-    embedder_sim1 = PooledEmbedder(n_components=2, method="umap")
+    # Fit embedder and transform
+    print(f"\nFitting {args.embedding_sim1.upper()} embedder for Simulation 1...")
+    embedder_sim1 = PooledEmbedder(n_components=2, method=args.embedding_sim1)
     embedder_sim1.fit([latent_sim1])
     embedded_sim1 = embedder_sim1.transform(latent_sim1)
     print(f"  Embedded shape: {embedded_sim1.shape}")
@@ -1665,77 +1479,33 @@ def main():
     phase_stable = observations_to_phase_representation(stable_result.observations, SFREQ)
     phase_exploratory = observations_to_phase_representation(exploratory_result.observations, SFREQ)
 
-    # Chunk and combine for training with labels
+    # Chunk and combine for training
     chunks_stable = chunk_phase_data(phase_stable, chunk_samples)
     chunks_exploratory = chunk_phase_data(phase_exploratory, chunk_samples)
     all_chunks_sim2 = chunks_stable + chunks_exploratory
-    # Labels: 0 = stable, 1 = exploratory
-    labels_sim2 = [0] * len(chunks_stable) + [1] * len(chunks_exploratory)
     print(f"  Total chunks: {len(all_chunks_sim2)}")
-    print(f"  Stable chunks: {len(chunks_stable)}, Exploratory chunks: {len(chunks_exploratory)}")
 
-    # === PHASE 1: Reconstruction ===
-    print(f"\n--- Phase 1: Training joint autoencoder ({n_epochs_phase1} epochs) ---")
-    model_sim2 = train_simulation_model(
-        all_chunks_sim2,
-        n_channels=N_CHANNELS,
-        hidden_size=hidden_size,
-        n_epochs=n_epochs_phase1,
-        device=DEVICE,
-        verbose=True,
-        labels=labels_sim2,
-        use_contrastive=False,
-        use_transformer=use_transformer,
-    )
-
-    # === PHASE 2: Contrastive (optional) ===
-    if use_two_phase:
-        print(f"\n--- Phase 2: Contrastive fine-tuning ({n_epochs_phase2} epochs) ---")
-        model_sim2.train()
-        optimizer = torch.optim.AdamW(model_sim2.parameters(), lr=1e-4)
-        criterion = nn.MSELoss()
-        contrastive_loss_fn = ContrastiveLoss(temperature=0.07, mode="condition")
-
-        data = torch.stack([torch.from_numpy(c) for c in all_chunks_sim2])
-        label_tensor = torch.tensor(labels_sim2, dtype=torch.long)
-        dataset = TensorDataset(data, label_tensor)
-        dataloader = DataLoader(dataset, batch_size=16, shuffle=True)
-
-        for epoch in tqdm(range(n_epochs_phase2), desc="Phase 2 (Contrastive)"):
-            epoch_loss = 0.0
-            n_batches = 0
-
-            for batch, batch_labels in dataloader:
-                batch = batch.float().to(DEVICE)
-                batch_labels = batch_labels.to(DEVICE)
-
-                optimizer.zero_grad()
-                output = model_sim2(batch)
-                reconstruction, latent = output if isinstance(output, tuple) else (output, model_sim2.encode(batch))
-
-                recon_loss = criterion(reconstruction, batch)
-                latent_mean = latent.mean(dim=1) if latent.dim() == 3 else latent
-                contr_loss = contrastive_loss_fn(latent_mean, batch_labels)
-
-                total_loss = (1 - args.contrastive_weight) * recon_loss + args.contrastive_weight * contr_loss
-                total_loss.backward()
-                torch.nn.utils.clip_grad_norm_(model_sim2.parameters(), 1.0)
-                optimizer.step()
-
-                epoch_loss += total_loss.item()
-                n_batches += 1
-
-            if (epoch + 1) % 10 == 0:
-                tqdm.write(f"Epoch {epoch+1}/{n_epochs_phase2}: loss={epoch_loss/n_batches:.4f}")
-
-        model_sim2.eval()
+    # Train or load model
+    if args.load_model:
+        print(f"\nReusing pre-trained model for Simulation 2...")
+        model_sim2 = model_sim1  # Reuse the same loaded model
+    else:
+        print(f"\nTraining joint autoencoder ({n_epochs} epochs)...")
+        model_sim2 = train_simulation_model(
+            all_chunks_sim2,
+            n_channels=N_CHANNELS,
+            hidden_size=hidden_size,
+            n_epochs=n_epochs,
+            device=DEVICE,
+            verbose=True,
+        )
 
     # Save model
     model_path_sim2 = output_dir / "simulation2_model.pt"
     torch.save({
         "model_state_dict": model_sim2.state_dict(),
         "n_channels": N_CHANNELS,
-        "hidden_size": hidden_size,
+        "hidden_size": hidden_size if not args.load_model else model_sim2.hidden_size,
     }, model_path_sim2)
     print(f"Saved model to: {model_path_sim2}")
 
@@ -1745,8 +1515,8 @@ def main():
     latent_exploratory = compute_latent_trajectory(model_sim2, phase_exploratory, DEVICE)
 
     # Joint embedder
-    print("\nFitting joint PCA embedder...")
-    embedder_sim2 = PooledEmbedder(n_components=2)
+    print(f"\nFitting joint {args.embedding_sim2.upper()} embedder...")
+    embedder_sim2 = PooledEmbedder(n_components=2, method=args.embedding_sim2)
     embedder_sim2.fit([latent_stable, latent_exploratory])
 
     embedded_stable = embedder_sim2.transform(latent_stable)
@@ -1901,8 +1671,13 @@ def main():
     im = ax_c.imshow(density, origin='lower', extent=list(embedder_sim1.bounds),
                     cmap='Blues', alpha=0.7, aspect='equal')
     mask = counts > 5
-    ax_c.quiver(X[mask], Y[mask], flow_x[mask], flow_y[mask],
-               np.sqrt(flow_x[mask]**2 + flow_y[mask]**2), cmap='Reds', alpha=0.8)
+    mag_c = np.sqrt(flow_x[mask]**2 + flow_y[mask]**2)
+    norm_fx_c = np.where(mag_c > 0, flow_x[mask] / mag_c, 0)
+    norm_fy_c = np.where(mag_c > 0, flow_y[mask] / mag_c, 0)
+    ax_c.quiver(X[mask], Y[mask], norm_fx_c, norm_fy_c,
+               mag_c, cmap='inferno', alpha=0.85,
+               scale=25, width=0.004, headwidth=4, headlength=5,
+               clim=(np.percentile(mag_c, 10), np.percentile(mag_c, 90)))
     ax_c.set_xlabel("Dim 1", fontsize=9)
     ax_c.set_ylabel("Dim 2", fontsize=9)
     ax_c.set_title("C) Density + Flow Field", fontweight='bold', fontsize=10)

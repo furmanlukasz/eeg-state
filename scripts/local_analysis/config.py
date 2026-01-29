@@ -26,8 +26,8 @@ DATASET = os.environ.get("EEG_DATASET", "greek_resting")
 
 # Model checkpoints for different datasets
 CHECKPOINT_PATHS = {
-    "greek_resting": Path("/Users/luki/Documents/GitHub/eeg-state-biomarkers/models/best2.pt"),
-    "meditation_bids": Path("/Users/luki/Documents/GitHub/eeg-state-biomarkers/models/best_meditation.pt"),
+    "greek_resting": Path("/Users/luki/Documents/GitHub/eeg-state-biomarkers/models/best_MCI_AD_HC.pt"),
+    "meditation_bids": Path("/Users/luki/Documents/GitHub/eeg-state-biomarkers/models/best_meditation_new.pt"),
 }
 
 # Model checkpoint (selected based on dataset)

@@ -14,7 +14,7 @@ def preprocess_raw(
     raw: mne.io.Raw,
     filter_low: float = 3.0,
     filter_high: float = 48.0,
-    reference: Literal["csd", "average"] = "csd",
+    reference: Literal["csd", "average"] | None = "csd",
     notch_freq: float | None = None,
     resample_freq: float | None = None,
     verbose: bool = False,
@@ -26,7 +26,7 @@ def preprocess_raw(
         raw: MNE Raw object (already loaded with preload=True)
         filter_low: Low cutoff frequency (Hz)
         filter_high: High cutoff frequency (Hz)
-        reference: Referencing method ("csd" or "average")
+        reference: Referencing method ("csd", "average", or None for no re-referencing)
         notch_freq: Notch filter frequency for line noise (50/60 Hz), or None
         resample_freq: Target sampling rate, or None to keep original
         verbose: Whether to print MNE output
@@ -45,11 +45,12 @@ def preprocess_raw(
     # Band-pass filter
     raw.filter(filter_low, filter_high, verbose=verbose)
 
-    # Apply referencing
+    # Apply referencing (None = keep original reference)
     if reference == "csd":
         raw = mne.preprocessing.compute_current_source_density(raw, verbose=verbose)
     elif reference == "average":
         raw.set_eeg_reference("average", verbose=verbose)
+    # elif reference is None: do nothing, keep original reference
 
     return raw
 

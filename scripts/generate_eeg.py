@@ -35,27 +35,31 @@ def load_model(checkpoint_path: Path, device: str = "cpu"):
     if "config" in checkpoint:
         config = checkpoint["config"]
         model_name = config.get("model", {}).get("name", "convlstm_autoencoder")
-        n_channels = config.get("n_channels", 256)
         include_amplitude = config.get("model", {}).get("phase", {}).get("include_amplitude", False)
     else:
-        # Fallback: try to infer from state dict
+        config = {}
         model_name = "convlstm_autoencoder"
         include_amplitude = False
-        # Try to get n_channels from first conv layer
-        state_dict = checkpoint.get("model_state_dict", checkpoint)
-        for key in state_dict:
-            if "conv" in key and "weight" in key:
-                in_channels = state_dict[key].shape[1]
-                # Could be n_channels * 2 (cos/sin) or n_channels * 3 (cos/sin/amp)
-                if in_channels % 3 == 0:
-                    n_channels = in_channels // 3
-                    include_amplitude = True
-                else:
-                    n_channels = in_channels // 2
-                    include_amplitude = False
-                break
-        else:
-            n_channels = 256
+
+    # Always infer n_channels from actual weights (config may be wrong)
+    state_dict = checkpoint.get("model_state_dict", checkpoint)
+    n_channels = None
+    for key in state_dict:
+        # Look for first conv layer to get input feature count
+        if "conv" in key and "weight" in key and state_dict[key].dim() == 3:
+            in_features = state_dict[key].shape[1]
+            # Could be n_channels * 2 (cos/sin) or n_channels * 3 (cos/sin/amp)
+            if in_features % 3 == 0:
+                n_channels = in_features // 3
+                include_amplitude = True
+            elif in_features % 2 == 0:
+                n_channels = in_features // 2
+                include_amplitude = False
+            break
+
+    if n_channels is None:
+        # Fallback to config
+        n_channels = config.get("n_channels", 256)
 
     # Calculate phase channels
     phase_channels = 3 if include_amplitude else 2
@@ -293,16 +297,23 @@ def plot_reconstruction_comparison(original: np.ndarray, reconstructed: np.ndarr
 
 def load_real_eeg(file_path: Path, chunk_duration: float = 5.0,
                   include_amplitude: bool = False):
-    """Load and preprocess real EEG for comparison."""
+    """Load and preprocess real EEG for comparison.
+
+    Dataset-specific preprocessing:
+    - BDF files (meditation): No re-referencing, broadband filter (1-125 Hz)
+    - FIF files (greek): Average reference, standard filter (1-48 Hz)
+    """
     import mne
     from eeg_biomarkers.data.preprocessing import preprocess_raw, extract_phase_circular
 
     print(f"Loading EEG from {file_path}...")
 
     # Detect file type and load
-    if file_path.suffix == ".fif":
+    is_meditation = file_path.suffix.lower() == ".bdf"
+
+    if file_path.suffix.lower() == ".fif":
         raw = mne.io.read_raw_fif(file_path, preload=True, verbose=False)
-    elif file_path.suffix == ".bdf":
+    elif file_path.suffix.lower() == ".bdf":
         raw = mne.io.read_raw_bdf(file_path, preload=True, verbose=False)
         # Select only EEG channels
         eeg_picks = mne.pick_types(raw.info, eeg=True)
@@ -310,7 +321,8 @@ def load_real_eeg(file_path: Path, chunk_duration: float = 5.0,
     else:
         raise ValueError(f"Unsupported file format: {file_path.suffix}")
 
-    # Preprocess
+    # Standard preprocessing for all datasets: average reference, 1-48 Hz filter
+    print("  Preprocessing: average reference, 1-48 Hz filter")
     raw = preprocess_raw(raw, filter_low=1.0, filter_high=48.0, reference="average")
 
     # Get data and extract phase
