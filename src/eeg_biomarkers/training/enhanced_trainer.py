@@ -261,6 +261,15 @@ class EnhancedTrainer:
         # Gradient clipping
         self.gradient_clip_norm = getattr(cfg.training, 'gradient_clip_norm', 1.0)
 
+        # Contrastive label shuffling (for ablation study)
+        # When enabled, contrastive pairs are formed with shuffled labels
+        # but true labels are preserved for evaluation
+        self.contrastive_shuffle_labels = getattr(cfg.training, 'contrastive_shuffle_labels', False)
+        self._shuffled_label_map: dict[int, int] | None = None
+
+        if self.contrastive_shuffle_labels:
+            logger.info("ABLATION: Contrastive labels will be shuffled (seed-controlled)")
+
         # Training state
         self.current_epoch = 0
         self.best_val_loss = float('inf')
@@ -282,6 +291,43 @@ class EnhancedTrainer:
             )
         else:
             raise ValueError(f"Unknown optimizer: {opt_cfg.name}")
+
+    def _get_shuffled_labels(self, labels: torch.Tensor) -> torch.Tensor:
+        """
+        Get shuffled labels for contrastive loss (ablation study).
+
+        Creates a consistent random permutation of labels across the entire run.
+        This breaks the true group structure while keeping the contrastive
+        mechanism active, testing whether the group effect is induced by
+        the contrastive objective.
+
+        Args:
+            labels: Original condition labels (batch,)
+
+        Returns:
+            Shuffled labels with same shape
+        """
+        # Initialize shuffle map on first call (seed-controlled)
+        if self._shuffled_label_map is None:
+            # Get unique labels from this batch
+            unique_labels = labels.unique().cpu().tolist()
+
+            # Create random permutation (seeded by experiment seed)
+            shuffled = unique_labels.copy()
+            random.shuffle(shuffled)
+
+            # Create mapping
+            self._shuffled_label_map = {
+                orig: shuf for orig, shuf in zip(unique_labels, shuffled)
+            }
+            logger.info(f"ABLATION: Created shuffled label map: {self._shuffled_label_map}")
+
+        # Apply shuffle map
+        shuffled_labels = labels.clone()
+        for orig, shuf in self._shuffled_label_map.items():
+            shuffled_labels[labels == orig] = shuf
+
+        return shuffled_labels
 
     def _setup_scheduler(self) -> torch.optim.lr_scheduler._LRScheduler | None:
         """Configure learning rate scheduler from config."""
@@ -419,6 +465,11 @@ class EnhancedTrainer:
 
             if labels is not None:
                 labels = labels.to(self.device) if isinstance(labels, torch.Tensor) else labels
+
+                # ABLATION: Shuffle labels for contrastive loss if enabled
+                # This creates a random mapping that's consistent across the run
+                if self.contrastive_shuffle_labels and self.lambda_contrastive > 0:
+                    labels = self._get_shuffled_labels(labels)
 
             # Check input data for NaN/Inf
             if torch.isnan(data).any() or torch.isinf(data).any():

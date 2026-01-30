@@ -1,0 +1,106 @@
+# Ablation Study: SHUFFLED_CONTRASTIVE
+# Identical to FULL but with contrastive labels randomly shuffled
+# This tests whether the GROUP EFFECT is induced by contrastive learning
+# (rather than just the embedding quality)
+#
+# Key: Shuffled labels are used ONLY for forming contrastive pairs.
+# True labels are preserved for downstream group comparisons.
+#
+# Usage:
+#   python -m eeg_biomarkers.training.train \
+#     --config-name=experiment/ablation_shuffled_contrastive \
+#     paths.data_dir=/path/to/ds001787
+
+defaults:
+  - /model: transformer
+  - /data: meditation_bids
+  - /training: enhanced
+  - override /data: meditation_bids
+  - _self_
+
+# Experiment name for output directory
+experiment:
+  name: "ablation_shuffled_contrastive"
+  seed: 42
+  device: "auto"
+
+# Model architecture (FIXED across all ablations)
+model:
+  name: "transformer_autoencoder"
+  encoder:
+    complexity: 2
+    hidden_size: 64
+    dropout: 0.1
+    n_heads: 4
+    n_transformer_layers: 2
+    dim_feedforward: 384
+  decoder:
+    use_encoder_config: true
+    constrain_output: true
+  phase:
+    representation: "circular"
+    include_amplitude: true
+    normalize_amplitude: true
+
+# Data preprocessing (FIXED - no re-referencing for meditation)
+data:
+  dataset: "meditation_bids"
+  preprocessing:
+    filter_low: 2.0
+    filter_high: 48.0
+    notch_freq: 50.0
+    reference: null  # No re-referencing (model was trained this way)
+    chunk_duration: 5.0
+    chunk_overlap: 0.0
+
+# Training settings (FIXED across ablations)
+training:
+  epochs: 600
+  batch_size: 64
+  gradient_clip_norm: 1.0
+
+  early_stopping:
+    enabled: true
+    patience: 30
+    min_delta: 0.001
+
+  checkpointing:
+    enabled: true
+    save_every_n_epochs: 20
+    save_best: true
+    save_last: true
+
+  optimizer:
+    name: "adamw"
+    lr: 0.0005
+    weight_decay: 0.01
+    betas: [0.9, 0.999]
+
+  scheduler:
+    name: "cosine"
+    warmup_epochs: 10
+    min_lr: 0.00001
+
+  # Loss weights (SHUFFLED CONTRASTIVE - contrastive ON but with random labels)
+  loss:
+    name: "mse_contrastive"
+
+  lambda_reconstruction: 1.0
+  lambda_phase: 1.0
+  lambda_amplitude: 0.5
+  lambda_unit_circle: 0.1
+  lambda_contrastive: 0.1  # CONTRASTIVE ON
+  lambda_triplet: 0.0
+  contrastive_temperature: 0.07
+  contrastive_mode: "condition"
+
+  # THE KEY DIFFERENCE: shuffle labels for contrastive pairs
+  contrastive_shuffle_labels: true  # SHUFFLED LABELS
+
+# Logging
+logging:
+  level: "INFO"
+  wandb:
+    enabled: true
+    project: "eeg-ablation-study"
+    entity: null
