@@ -1,3 +1,4 @@
+# @package _global_
 # Ablation Study: FULL (baseline with contrastive)
 # This is the control condition - identical to the meditation model in the paper
 #
@@ -10,7 +11,6 @@ defaults:
   - /model: transformer
   - /data: meditation_bids
   - /training: enhanced
-  - override /data: meditation_bids
   - _self_
 
 # Experiment name for output directory
@@ -44,9 +44,10 @@ data:
     filter_low: 2.0
     filter_high: 48.0
     notch_freq: 50.0
-    reference: null  # No re-referencing (model was trained this way)
+    reference: ~  # null = No re-referencing (model was trained this way)
     chunk_duration: 5.0
     chunk_overlap: 0.0
+    phase_method: "hilbert"
 
 # Training settings (FIXED across ablations)
 training:

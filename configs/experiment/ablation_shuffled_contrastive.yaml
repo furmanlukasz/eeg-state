@@ -1,3 +1,4 @@
+# @package _global_
 # Ablation Study: SHUFFLED_CONTRASTIVE
 # Identical to FULL but with contrastive labels randomly shuffled
 # This tests whether the GROUP EFFECT is induced by contrastive learning
@@ -15,7 +16,6 @@ defaults:
   - /model: transformer
   - /data: meditation_bids
   - /training: enhanced
-  - override /data: meditation_bids
   - _self_
 
 # Experiment name for output directory
@@ -49,9 +49,10 @@ data:
     filter_low: 2.0
     filter_high: 48.0
     notch_freq: 50.0
-    reference: null  # No re-referencing (model was trained this way)
+    reference: ~  # null = No re-referencing (model was trained this way)
     chunk_duration: 5.0
     chunk_overlap: 0.0
+    phase_method: "hilbert"
 
 # Training settings (FIXED across ablations)
 training:
