@@ -300,8 +300,8 @@ def load_real_eeg(file_path: Path, chunk_duration: float = 5.0,
     """Load and preprocess real EEG for comparison.
 
     Dataset-specific preprocessing:
-    - BDF files (meditation): No re-referencing, broadband filter (1-125 Hz)
-    - FIF files (greek): Average reference, standard filter (1-48 Hz)
+    - BDF files (meditation): No re-referencing, 2-48 Hz filter
+    - FIF files (greek): Average reference, 1-48 Hz filter
     """
     import mne
     from eeg_biomarkers.data.preprocessing import preprocess_raw, extract_phase_circular
@@ -321,9 +321,15 @@ def load_real_eeg(file_path: Path, chunk_duration: float = 5.0,
     else:
         raise ValueError(f"Unsupported file format: {file_path.suffix}")
 
-    # Standard preprocessing for all datasets: average reference, 1-48 Hz filter
-    print("  Preprocessing: average reference, 1-48 Hz filter")
-    raw = preprocess_raw(raw, filter_low=1.0, filter_high=48.0, reference="average")
+    # Dataset-specific preprocessing
+    if is_meditation:
+        # Meditation BDF: No re-referencing, 2-48 Hz filter (matches training)
+        print("  Preprocessing: no reference, 2-48 Hz filter")
+        raw = preprocess_raw(raw, filter_low=2.0, filter_high=48.0, reference=None)
+    else:
+        # Greek FIF: Average reference, 1-48 Hz filter
+        print("  Preprocessing: average reference, 1-48 Hz filter")
+        raw = preprocess_raw(raw, filter_low=1.0, filter_high=48.0, reference="average")
 
     # Get data and extract phase
     data = raw.get_data()

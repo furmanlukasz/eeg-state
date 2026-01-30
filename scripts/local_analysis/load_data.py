@@ -12,13 +12,18 @@ import sys
 sys.path.insert(0, str(Path(__file__).parent.parent.parent / "src"))
 
 
-def load_eeg_from_file(file_path: Path, verbose: bool = True):
+def load_eeg_from_file(file_path: Path, verbose: bool = True, apply_preprocessing: bool = True):
     """
     Load EEG data from file (FIF or BDF format).
+
+    Dataset-specific preprocessing is applied:
+    - BDF files (meditation): No re-referencing, 2-48 Hz filter
+    - FIF files (greek): No re-referencing in this function (done separately if needed)
 
     Args:
         file_path: Path to .fif or .bdf file
         verbose: Whether to print info
+        apply_preprocessing: Whether to apply MNE preprocessing (reference, filter)
 
     Returns:
         Tuple of (raw_data, sfreq, channel_names)
@@ -31,6 +36,7 @@ def load_eeg_from_file(file_path: Path, verbose: bool = True):
 
     # Detect file format
     suffix = file_path.suffix.lower()
+    is_meditation = suffix == ".bdf"
 
     if suffix == ".fif":
         raw = mne.io.read_raw_fif(file_path, preload=True)
@@ -42,6 +48,13 @@ def load_eeg_from_file(file_path: Path, verbose: bool = True):
             raw = raw.pick(eeg_picks)
     else:
         raise ValueError(f"Unsupported file format: {suffix}")
+
+    # Apply dataset-specific preprocessing
+    if apply_preprocessing and is_meditation:
+        # Meditation BDF: No re-referencing, 2-48 Hz filter (matches training)
+        if verbose:
+            print(f"  Preprocessing: no reference, 2-48 Hz filter")
+        raw.filter(2.0, 48.0, verbose=False)
 
     if verbose:
         print(f"Loaded: {file_path.name}")
@@ -64,6 +77,7 @@ def extract_phase_circular(
     filter_low: float = 1.0,
     filter_high: float = 30.0,
     include_amplitude: bool = True,
+    skip_filter: bool = False,
 ) -> np.ndarray:
     """
     Extract circular phase representation (cos, sin) and optionally amplitude.
@@ -76,6 +90,7 @@ def extract_phase_circular(
         filter_low: Low cutoff for bandpass filter
         filter_high: High cutoff for bandpass filter
         include_amplitude: Whether to include log-amplitude as third channel
+        skip_filter: If True, skip bandpass filtering (use when data is pre-filtered)
 
     Returns:
         phase_data: (n_channels * phase_channels, n_samples) where phase_channels is 2 or 3
@@ -84,13 +99,16 @@ def extract_phase_circular(
 
     n_channels, n_samples = data.shape
 
-    # Bandpass filter
-    nyq = sfreq / 2
-    low = filter_low / nyq
-    high = filter_high / nyq
-    b, a = butter(4, [low, high], btype="band")
-
-    filtered = filtfilt(b, a, data, axis=1)
+    if skip_filter:
+        # Data already filtered, use as-is
+        filtered = data
+    else:
+        # Bandpass filter
+        nyq = sfreq / 2
+        low = filter_low / nyq
+        high = filter_high / nyq
+        b, a = butter(4, [low, high], btype="band")
+        filtered = filtfilt(b, a, data, axis=1)
 
     # Hilbert transform for analytic signal
     analytic = hilbert(filtered, axis=1)
@@ -140,8 +158,8 @@ def chunk_data(data: np.ndarray, chunk_samples: int, overlap: float = 0.0):
 
 def load_and_preprocess_file(
     file_path: Path,
-    filter_low: float = 1.0,
-    filter_high: float = 30.0,
+    filter_low: float = None,
+    filter_high: float = None,
     chunk_duration: float = 5.0,
     include_amplitude: bool = True,
     verbose: bool = True,
@@ -149,10 +167,14 @@ def load_and_preprocess_file(
     """
     Load EEG file (FIF or BDF) and extract phase chunks ready for model.
 
+    Dataset-specific defaults:
+    - BDF files (meditation): 2-48 Hz filter, no reference (applied in load_eeg_from_file)
+    - FIF files (greek): 1-30 Hz filter (legacy default)
+
     Args:
         file_path: Path to .fif or .bdf file
-        filter_low: Bandpass low cutoff
-        filter_high: Bandpass high cutoff
+        filter_low: Bandpass low cutoff (None = dataset-specific default)
+        filter_high: Bandpass high cutoff (None = dataset-specific default)
         chunk_duration: Chunk duration in seconds
         include_amplitude: Include amplitude in phase representation
         verbose: Print progress info
@@ -165,16 +187,35 @@ def load_and_preprocess_file(
             - channel_names: List of channel names
             - subject_id: Extracted subject ID
     """
-    # Load raw data
-    raw_data, sfreq, channel_names = load_eeg_from_file(file_path, verbose)
+    # Detect dataset type
+    is_meditation = file_path.suffix.lower() == ".bdf"
+
+    # Dataset-specific filter defaults
+    if filter_low is None:
+        filter_low = 2.0 if is_meditation else 1.0
+    if filter_high is None:
+        filter_high = 48.0 if is_meditation else 30.0
+
+    # Load raw data (MNE preprocessing applied for meditation in load_eeg_from_file)
+    # For meditation, filtering is done in MNE, so we skip scipy filtering in extract_phase
+    raw_data, sfreq, channel_names = load_eeg_from_file(file_path, verbose, apply_preprocessing=is_meditation)
     n_channels = len(channel_names)
 
     # Extract phase
-    if verbose:
-        print(f"  Extracting phase ({filter_low}-{filter_high} Hz)...")
-    phase_data = extract_phase_circular(
-        raw_data, sfreq, filter_low, filter_high, include_amplitude
-    )
+    # For meditation: data already filtered by MNE (2-48 Hz), skip scipy filtering
+    # For Greek: apply scipy filter here
+    if is_meditation:
+        if verbose:
+            print(f"  Extracting phase (data pre-filtered 2-48 Hz)...")
+        phase_data = extract_phase_circular(
+            raw_data, sfreq, include_amplitude=include_amplitude, skip_filter=True
+        )
+    else:
+        if verbose:
+            print(f"  Extracting phase ({filter_low}-{filter_high} Hz)...")
+        phase_data = extract_phase_circular(
+            raw_data, sfreq, filter_low, filter_high, include_amplitude
+        )
 
     # Chunk
     chunk_samples = int(chunk_duration * sfreq)
