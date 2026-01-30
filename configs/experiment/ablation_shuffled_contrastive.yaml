@@ -97,6 +97,13 @@ training:
   # THE KEY DIFFERENCE: shuffle labels for contrastive pairs
   contrastive_shuffle_labels: true  # SHUFFLED LABELS
 
+# Paths (required for Hydra overrides)
+paths:
+  data_dir: "data/ds001787"  # Override via command line
+  output_dir: "${hydra:runtime.cwd}/outputs"
+  model_dir: "${hydra:runtime.output_dir}/checkpoints"
+  results_dir: "${hydra:runtime.output_dir}/results"
+
 # Logging
 logging:
   level: "INFO"

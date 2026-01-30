@@ -92,6 +92,13 @@ training:
   # Ablation-specific flag
   contrastive_shuffle_labels: false  # Real labels
 
+# Paths (required for Hydra overrides)
+paths:
+  data_dir: "data/ds001787"  # Override via command line
+  output_dir: "${hydra:runtime.cwd}/outputs"
+  model_dir: "${hydra:runtime.output_dir}/checkpoints"
+  results_dir: "${hydra:runtime.output_dir}/results"
+
 # Logging
 logging:
   level: "INFO"
