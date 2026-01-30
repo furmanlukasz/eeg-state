@@ -56,7 +56,7 @@ data:
 
 # Training settings (FIXED across ablations)
 training:
-  epochs: 600
+  epochs: 300
   batch_size: 64
   gradient_clip_norm: 1.0
 
