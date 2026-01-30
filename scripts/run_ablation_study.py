@@ -64,7 +64,8 @@ def build_training_command(
     cmd = [
         sys.executable, "-m", "eeg_biomarkers.training.train",
         f"--config-name={config}",
-        f"paths.data_dir={data_dir}",
+        # Use + prefix to add/override keys that may not exist in struct
+        f"+paths.data_dir={data_dir}",
         f"experiment.seed={seed}",
         f"logging.wandb.enabled={str(wandb_enabled).lower()}",
         # Override output directory to organize by variant
