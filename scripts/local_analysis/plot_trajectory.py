@@ -46,6 +46,7 @@ from config import (
 )
 from load_model import load_model_from_checkpoint, create_model, compute_latent_trajectory
 from load_data import load_and_preprocess_fif
+from velocity import compute_speed, compute_displacement
 
 # Color mapping
 GROUP_COLORS = {0: "blue", 1: "orange", 2: "red"}
@@ -126,14 +127,16 @@ def compute_instantaneous_speed(latent: np.ndarray, dt: float = 1.0) -> np.ndarr
 
     Args:
         latent: (T, D) trajectory
-        dt: time step (default 1 sample)
+        dt: time step in seconds (default 1 sample)
 
     Returns:
         speed: (T-1,) array of speeds
+
+    Note:
+        This function now delegates to the centralized velocity module
+        for consistency and to support configurable Δt and Savitzky-Golay.
     """
-    diff = np.diff(latent, axis=0)
-    speed = np.linalg.norm(diff, axis=1) / dt
-    return speed
+    return compute_speed(latent, method="finite_diff", delta_t=1, dt_seconds=dt)
 
 
 def detect_dwell_episodes(

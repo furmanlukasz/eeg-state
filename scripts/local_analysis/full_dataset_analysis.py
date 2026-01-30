@@ -55,6 +55,10 @@ from config import (
 )
 from load_model import load_model_from_checkpoint, create_model, compute_latent_trajectory
 from load_data import load_and_preprocess_file
+from velocity import compute_speed as _compute_speed, compute_displacement, VelocityConfig
+
+# Global velocity config (set by main() based on CLI args)
+VELOCITY_CONFIG: Optional[VelocityConfig] = None
 
 # Optional imports
 try:
@@ -287,9 +291,15 @@ def delay_embedding(z: np.ndarray, tau: int = 5, dim: int = 3, n_components: int
 # =============================================================================
 
 def compute_instantaneous_speed(embedded: np.ndarray) -> np.ndarray:
-    """Compute speed in embedding space."""
-    diff = np.diff(embedded, axis=0)
-    return np.linalg.norm(diff, axis=1)
+    """Compute speed in embedding space.
+
+    Uses global VELOCITY_CONFIG if set, otherwise defaults to finite diff with Δt=1.
+    """
+    global VELOCITY_CONFIG
+    if VELOCITY_CONFIG is not None:
+        return _compute_speed(embedded, config=VELOCITY_CONFIG)
+    else:
+        return _compute_speed(embedded, method="finite_diff", delta_t=1)
 
 
 def detect_dwell_episodes(speed: np.ndarray, threshold_percentile: float = 20, min_duration: int = 10) -> list:
@@ -498,7 +508,11 @@ def compute_radial_profile(embedded: np.ndarray, centroid: np.ndarray, n_bins: i
 def compute_radial_speed_profile(embedded: np.ndarray, centroid: np.ndarray, n_bins: int = 20) -> tuple[np.ndarray, np.ndarray]:
     """Compute mean speed as a function of radius."""
     speed = compute_instantaneous_speed(embedded)
-    radii = np.linalg.norm(embedded[:-1] - centroid, axis=1)  # Match speed length
+
+    # Align radii with speed length (savgol returns T, finite_diff returns T-1)
+    speed_len = len(speed)
+    radii = np.linalg.norm(embedded[:speed_len] - centroid, axis=1)
+
     max_r = np.percentile(radii, 99)
     bins = np.linspace(0, max_r, n_bins + 1)
     bin_indices = np.digitize(radii, bins) - 1
@@ -2648,6 +2662,18 @@ def main():
                         help="Quick test mode (100 bootstrap, 5 subjects)")
     parser.add_argument("--no-show", action="store_true",
                         help="Don't display plots interactively")
+
+    # Velocity estimation options (for robustness testing)
+    parser.add_argument("--velocity-method", type=str, default="finite_diff",
+                        choices=["finite_diff", "savgol"],
+                        help="Velocity estimation method (default: finite_diff)")
+    parser.add_argument("--delta-t", type=int, default=1,
+                        help="Time step for finite differences (default: 1)")
+    parser.add_argument("--savgol-window", type=int, default=5,
+                        help="Window size for Savitzky-Golay (must be odd, default: 5)")
+    parser.add_argument("--savgol-poly", type=int, default=2,
+                        help="Polynomial order for Savitzky-Golay (default: 2)")
+
     args = parser.parse_args()
 
     # Set matplotlib backend to non-interactive if --no-show
@@ -2662,9 +2688,19 @@ def main():
         args.n_subjects = 5
         print("QUICK MODE: 100 bootstrap iterations, 5 subjects per group")
 
+    # Set up global velocity config
+    global VELOCITY_CONFIG
+    VELOCITY_CONFIG = VelocityConfig(
+        method=args.velocity_method,
+        delta_t=args.delta_t,
+        savgol_window=args.savgol_window,
+        savgol_poly=args.savgol_poly,
+    )
+
     print(f"\n{'='*80}")
     print(f"DATASET: {DATASET}")
     print(f"CHECKPOINT: {CHECKPOINT_PATH}")
+    print(f"VELOCITY: {args.velocity_method} (Δt={args.delta_t}, SG_window={args.savgol_window})")
     print(f"{'='*80}")
 
     # Create timestamped output directory

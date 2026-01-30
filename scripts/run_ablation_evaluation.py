@@ -40,6 +40,9 @@ sys.path.insert(0, str(SCRIPT_DIR))
 sys.path.insert(0, str(SCRIPT_DIR.parent / "src"))
 sys.path.insert(0, str(SCRIPT_DIR / "local_analysis"))
 
+# Import velocity utilities (configurable Δt and Savitzky-Golay support)
+from velocity import compute_speed, VelocityConfig
+
 
 def find_checkpoint(variant_dir: Path, checkpoint_name: str = "best.pt") -> Optional[Path]:
     """Find checkpoint in variant output directory.
@@ -172,9 +175,8 @@ def compute_latent_speed_analysis(
                     # Get latent trajectory
                     latent = compute_latent_trajectory(model, phase_data, device)
 
-                    # Compute speed
-                    diff = np.diff(latent, axis=0)
-                    speed = np.linalg.norm(diff, axis=1)
+                    # Compute speed (using configurable velocity estimation)
+                    speed = compute_speed(latent, method="finite_diff", delta_t=1)
                     subject_speeds.append(np.mean(speed))
 
                 # Store subject mean speed

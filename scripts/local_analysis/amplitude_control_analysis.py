@@ -50,6 +50,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent / "src"))
 import config as cfg
 from load_model import load_model_from_checkpoint, create_model, compute_latent_trajectory
 from load_data import load_eeg_from_file, extract_phase_circular
+from velocity import compute_speed as _compute_speed
 
 
 def get_n_channels_from_checkpoint(checkpoint_path: Path) -> tuple[int, bool]:
@@ -197,9 +198,12 @@ def compute_latent_radius(latent: np.ndarray) -> np.ndarray:
 
 
 def compute_latent_speed(latent: np.ndarray) -> np.ndarray:
-    """Compute ||h(t+1) - h(t)||."""
-    diff = np.diff(latent, axis=0)
-    return np.linalg.norm(diff, axis=1)
+    """Compute ||h(t+1) - h(t)||.
+
+    Note: Delegates to centralized velocity module for consistency
+    and configurable Δt/Savitzky-Golay support.
+    """
+    return _compute_speed(latent, method="finite_diff", delta_t=1)
 
 
 def compute_pca_latent(phase_data: np.ndarray, n_components: int = 64) -> np.ndarray:

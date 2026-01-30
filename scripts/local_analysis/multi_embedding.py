@@ -47,6 +47,7 @@ from config import (
 )
 from load_model import load_model_from_checkpoint, create_model, compute_latent_trajectory
 from load_data import load_and_preprocess_fif
+from velocity import compute_speed as _compute_speed
 
 # Optional imports
 try:
@@ -326,9 +327,12 @@ def delay_embedding(
 # =============================================================================
 
 def compute_instantaneous_speed(embedded: np.ndarray) -> np.ndarray:
-    """Compute speed in embedding space."""
-    diff = np.diff(embedded, axis=0)
-    return np.linalg.norm(diff, axis=1)
+    """Compute speed in embedding space.
+
+    Note: Delegates to centralized velocity module for consistency
+    and configurable Δt/Savitzky-Golay support.
+    """
+    return _compute_speed(embedded, method="finite_diff", delta_t=1)
 
 
 def detect_dwell_episodes(

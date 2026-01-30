@@ -55,8 +55,10 @@ from torch.utils.data import DataLoader, TensorDataset
 
 # Add src to path for model imports
 sys.path.insert(0, str(Path(__file__).parent.parent.parent / "src"))
+sys.path.insert(0, str(Path(__file__).parent))  # For local_analysis imports
 
 from eeg_biomarkers.models import ConvLSTMAutoencoder
+from velocity import compute_speed as _compute_speed
 
 # =============================================================================
 # CONFIGURATION
@@ -803,9 +805,12 @@ def compute_latent_trajectory(
 # =============================================================================
 
 def compute_instantaneous_speed(embedded: np.ndarray) -> np.ndarray:
-    """Compute speed in embedding space."""
-    diff = np.diff(embedded, axis=0)
-    return np.linalg.norm(diff, axis=1)
+    """Compute speed in embedding space.
+
+    Note: Delegates to centralized velocity module for consistency
+    and configurable Δt/Savitzky-Golay support.
+    """
+    return _compute_speed(embedded, method="finite_diff", delta_t=1)
 
 
 def detect_dwell_episodes(
