@@ -1,0 +1,1021 @@
+% =========================
+% Paper 1 LaTeX (polished, no bibliography block)
+% Dynamical Microscope for Resting-State EEG
+% =========================
+
+\documentclass[5p,twocolumn,authoryear]{elsarticle}
+
+\usepackage{natbib}
+\biboptions{authoryear,round}
+\usepackage{amsmath,amssymb}
+\usepackage{graphicx}
+% NOTE: Remove [draft] option before final submission to show figures
+% -------------------------
+% Helper macros
+% -------------------------
+\newcommand{\figref}[1]{Fig.~\ref{#1}}
+\newcommand{\tabref}[1]{Table~\ref{#1}}
+\newcommand{\secref}[1]{Sec.~\ref{#1}}
+
+\usepackage{hyperref}
+\usepackage{booktabs}
+\usepackage{float}
+\usepackage{placeins}
+\usepackage{caption}
+\usepackage{subcaption}
+% NOTE: Removed \usepackage{geometry} and \geometry{margin=1in} to avoid conflicts with elsarticle template
+
+\journal{Journal Name}
+
+\begin{document}
+
+\begin{frontmatter}
+
+\title{A Dynamical Microscope for Resting-State EEG:\\
+Latent Trajectory Geometry and Flow Metrics from Circular Phase--Amplitude Representations}
+
+\author[1]{Łukasz Furman\corref{cor1}}
+\author[2,3]{Ludovico Minati}
+\author[1]{Włodzisław Duch}
+
+\address[1]{Faculty of Physics, Astronomy and Informatics, Nicolaus Copernicus University, 87-100, Toruń, Poland}
+\address[2]{School of Life Science and Technology, University of Electronic Science and Technology of China, 611731 Chengdu, China}
+\address[3]{Center for Mind/Brain Sciences (CIMeC), University of Trento, 38123 Trento, Italy}
+
+\cortext[cor1]{Corresponding author}
+
+\begin{abstract}
+Resting-state EEG lacks explicit events and is dominated by non-stationary dynamics, making segment choice and dynamical interpretation difficult.
+We introduce a ``dynamical microscope'' framework that converts multichannel EEG into circular phase--amplitude features, learns a data-driven latent trajectory representation with an autoencoder, and quantifies dynamical regimes through trajectory geometry and flow-field metrics.
+Using synthetic dynamical systems as ground-truth validation and an open meditation dataset as empirical validation, we show that differences emerge primarily in how trajectories move through latent space (flow geometry and exploration), rather than in discrete state occupancy.
+\end{abstract}
+
+\begin{keyword}
+Resting-state EEG \sep dynamical systems \sep autoencoder \sep circular representations \sep phase and amplitude \sep latent trajectories \sep metastability
+\end{keyword}
+
+\end{frontmatter}
+
+% =========================
+\section{Introduction}
+% =========================
+
+\subsection{Motivation: resting-state EEG as a dynamical system}
+
+Resting-state brain activity is highly dynamic and metastable, even in the absence of explicit tasks or stimuli. Unlike evoked responses that are time-locked to events, ongoing EEG at rest exhibits continual fluctuations and short-lived patterns of coordination among brain regions. Neural ensembles spontaneously couple and decouple in time, reflecting a balance between integration and segregation of activity \citet{TognoliKelso2014}. Metastability implies that the brain does not reside in a single stationary state but transitions among a repertoire of semi-stable configurations across multiple time scales \citet{Rabinovich2008,TognoliKelso2014}. M/EEG studies suggest that large-scale network configurations can be stable only for tens to hundreds of milliseconds \citet{Baker2014,Vidaurre2018}. In scalp EEG, this is captured by microstates---brief periods (roughly 50--100~ms) during which the scalp potential topography remains quasi-stable before switching to a new configuration \citet{Michel2018}. Together, these observations reinforce that ``resting'' activity is inherently non-stationary and structured in time.
+
+Characterizing such dynamics is challenging because resting-state data lack external markers that naturally segment the signal. Segment choice is often arbitrary, and stationarity assumptions are frequently violated. Traditional stationary summaries (e.g., a single spectrum or connectivity matrix over a long epoch) can obscure transient structure. These issues motivate approaches that treat resting-state EEG as a continuous trajectory evolving in a high-dimensional state space, where the objects of interest are not isolated states but the geometry and flow of trajectories over time.
+
+Importantly, for resting-state EEG this ``trajectory'' should not be understood as a single clean curve in latent space. A more appropriate picture is a \emph{stochastic flow} on a low-dimensional manifold: at each moment, the latent state undergoes structured drift (local flow) together with substantial variability, yielding an evolving probability density over states. As a result, single short realizations can appear as ``snake-like'' paths, while pooling longer time spans, windows, or subjects naturally produces dense point clouds with metastable basins (high-occupancy regions) and preferred directions of motion (flow fields). In this sense, trajectory-centric (Lagrangian) and density/field-centric (Eulerian) views are complementary descriptions of the same underlying dynamics.
+
+\subsection{From ``state labels'' to trajectory laws}
+
+Many frameworks for analyzing brain dynamics reduce continuous activity to a sequence of discrete ``states.'' In EEG microstate analysis, each time point is assigned to one of a few prototypical scalp maps, and comparisons across conditions focus on metrics such as fractional occupancy and mean duration \citet{Michel2018}. Similarly, hidden Markov model approaches represent activity as probabilistic switching among latent states with characteristic patterns and dwell times \citet{Baker2014,Vidaurre2018}. Such state-based methods are useful for summarizing recurring configurations, but a primary focus on state occupancy can miss differences that are expressed in the \emph{motion} through state space.
+
+A complementary hypothesis is that conditions or groups may share a common manifold (i.e., occupy broadly similar regions of state space) yet differ systematically in their trajectory laws: local flow structure, velocities, path geometry, recurrence, and exploration versus confinement. Empirical and theoretical work links altered brain conditions to changes in metastability and temporal exploration rather than wholesale changes in the set of accessible configurations \citet{Cavanna2018,Deco2017}. This motivates shifting emphasis from ``which states are visited'' to ``how trajectories evolve,'' and from static labels to dynamical descriptions of motion on learned coordinates.
+
+\subsection{Contributions}
+
+We adopt a trajectory-centric dynamical-systems view and introduce a framework designed as a ``dynamical microscope'' rather than a classifier. Our contributions are:
+\begin{itemize}
+    \item A circular phase--amplitude encoding of multichannel EEG that respects phase geometry and captures amplitude modulations.
+    \item A latent-trajectory framework in which an autoencoder learns a compact representation of ongoing EEG dynamics, treated explicitly as continuous trajectories.
+    \item Trajectory- and flow-based metrics that quantify dynamical regimes in terms of motion, geometry, and exploration rather than discrete state occupancy.
+    \item Ground-truth validation on synthetic dynamical systems with known regimes, demonstrating sensitivity to differences in dynamical laws even when state-space regions overlap.
+    \item Empirical validation on an open resting-state meditation dataset, showing shared latent manifolds with condition-dependent flow geometry and trajectory organization, with robustness across embedding choices.
+\end{itemize}
+
+\begin{figure*}[t]
+    \centering
+    \includegraphics[width=0.95\textwidth]{figures/paper1/fig01_workflow.png}
+    \caption{Workflow schematic of the dynamical microscope framework (placeholder). The depicted ``trajectory'' is schematic; empirical analyses emphasize both time-ordered realizations and ensemble summaries (densities and flow fields) obtained by pooling across time and/or subjects.}
+    \label{fig:workflow}
+\end{figure*}
+
+% =========================
+\section{Related Work}
+% =========================
+
+\subsection{Dynamical systems views of brain activity}
+
+Dynamical systems theory provides a principled framework for understanding brain activity as trajectories evolving on structured state spaces \citet{Kelso1995,Breakspear2017}. A central concept is metastability: partial and transient coordination among subsystems that preserves both integration and flexibility \citet{TognoliKelso2014}. This viewpoint emphasizes transient dwell near quasi-stable configurations and ongoing transitions rather than convergence to a single stable attractor.
+
+Computational models of large-scale dynamics suggest that rich switching among network configurations can emerge near critical regimes of coupling, yielding maximal metastability and broad dynamical repertoires \citet{Deco2017}. Breakspear reviewed how attractors, oscillatory instabilities, and multiscale network interactions can explain complex non-stationary neural time series \citet{Breakspear2017}. In parallel, Rabinovich and colleagues argued that cognition can be described by transient dynamics on high-dimensional competitive landscapes, where trajectories proceed through sequences of metastable configurations \citet{Rabinovich2008}. These perspectives motivate trajectory-centric descriptions that quantify how activity moves through state space.
+
+A complementary modeling tradition uses biophysically motivated neural mass and mean-field models (e.g., Wilson--Cowan and Jansen--Rit) and whole-brain simulation platforms (e.g., The Virtual Brain) to generate synthetic dynamics with interpretable control parameters \citet{WilsonCowan1972,JansenRit1995,SanzLeon2013}.
+
+\subsection{Representation learning for EEG}
+
+Deep learning has enabled representation learning for EEG, including convolutional architectures that learn spectral-spatial features from raw signals \citet{Schirrmeister2017} and broader applications across EEG decoding tasks \citet{Roy2019}. More recently, self-supervised and unsupervised approaches (e.g., contrastive objectives and reconstruction-based models) have sought transferable representations from unlabeled EEG \citet{Banville2021,Kostas2021}. These methods can capture recurring EEG motifs and yield compact latent spaces.
+
+However, most EEG representation learning is evaluated by predictive utility, and latent spaces are often treated as features rather than dynamical state spaces. Latent dimensions may not correspond to interpretable neurophysiological variables, and temporal structure is frequently aggregated into chunk-level embeddings. In contrast, we use representation learning as a coordinate transformation that preserves moment-to-moment variation, producing a continuous latent trajectory that can be interrogated using dynamical and geometric measures rather than optimized for classification accuracy.
+
+Conceptually, this use of an autoencoder aligns with classic nonlinear dimensionality-reduction views of autoencoders \citet{Hinton2006} and with the broader perspective that many neural recordings admit low-dimensional ``neural manifolds'' on which dynamics unfold \citet{CunninghamYu2014}.
+
+Related latent-variable approaches explicitly couple representation learning with dynamical priors, including variational autoencoders \citet{KingmaWelling2014} and sequential latent dynamical models developed for population activity (e.g., LFADS) \citet{Pandarinath2018}. More broadly, nonlinear state-space models with amortized inference networks \citet{Krishnan2017Structured} and switching/segmented dynamical models (e.g., recurrent switching linear dynamical systems) \citet{Linderman2017rSLDS} provide complementary ways to formalize latent trajectories and their regime structure.
+
+\subsection{Trajectory-based and recurrence-based analyses}
+
+Nonlinear time-series analysis offers trajectory-centric tools such as recurrence plots and recurrence quantification analysis (RQA), which summarize revisitation structure, determinism, and stability in reconstructed state spaces \citet{Marwan2007}. While recurrence methods can quantify dynamical changes in physiological signals, they can be sensitive to embedding and threshold choices, and applying them to multichannel, non-stationary EEG can be challenging.
+
+State-space geometry approaches include microstates, which discretize trajectories by clustering EEG topographies \citet{Michel2018}, and HMM-based analyses, which infer probabilistic switching among transient network states and estimate dwell/transition structure \citet{Baker2014,Vidaurre2018}. These methods provide compact summaries but impose categorical boundaries that can obscure within-region flow structure.
+
+Related approaches aim to recover dynamical laws directly from data, including sparse identification of nonlinear dynamical systems (SINDy) \citet{Brunton2016}, dynamic mode decomposition \citet{Schmid2010DMD}, and continuous-time latent dynamical models such as neural ordinary differential equations \citet{Chen2018}. Manifold-learning constructions such as diffusion maps \citet{CoifmanLafon2006} provide an additional perspective on learning low-dimensional coordinates adapted to nonlinear geometry.
+
+Our framework is complementary: it retains a continuous latent trajectory and estimates flow fields and trajectory geometry directly in the learned space. This enables quantification of differences in motion (e.g., speed, tortuosity, exploration) even when conditions share a manifold and state occupancy is similar, a common feature of metastable dynamics \citet{TognoliKelso2014,Deco2017}.
+
+% =========================
+\section{Methods}
+% =========================
+
+\subsection{Data}
+\subsubsection{Open empirical dataset: Meditation BIDS}
+We used the openly available meditation EEG dataset ds001787 (OpenNeuro; BIDS formatted), originally collected to study reduced mind wandering in experienced meditators and associated EEG correlates \citet{BrandmeyerDelorme2016,Delorme2018BIDS}. The experiment includes repeated experience-sampling probes during meditation to label subjective mind-wandering versus on-task periods, enabling comparisons between experts and novices on identical recording protocols.
+
+\subsubsection{Synthetic dynamical systems (ground-truth validation)}
+To validate whether the proposed dynamical microscope recovers known dynamical structure, we constructed synthetic multivariate dynamical systems with explicitly defined latent dynamics and regime structure. The simulations provide full access to ground-truth regime identity and dynamical parameters, while keeping the observation model generic enough to avoid tuning the analysis pipeline to a particular system class.
+
+Across simulations, a low-dimensional latent state $\mathbf{s}(t) \in \mathbb{R}^{d_0}$ evolves under regime-dependent linear dynamics with additive noise:
+\begin{equation}
+\mathbf{s}(t+\Delta t) = A_{r(t)}\,\mathbf{s}(t) + \mathbf{b}_{r(t)} + \boldsymbol{\epsilon}(t),
+\end{equation}
+where $r(t)$ denotes the regime index with finite dwell times. Regimes differ in their dynamical laws (e.g., stability and rotational components) rather than by occupying disjoint regions of state space, so trajectories may overlap spatially while differing in local flow structure.
+
+Latent trajectories are mapped to $C=30$ observed channels via a fixed random mixing matrix, producing multivariate oscillatory time series. Ground-truth regime identity, dwell episodes, and transition times are recorded for evaluation and visualization only, and are not used in representation learning or metric definitions.
+
+All simulations are generated at 250~Hz for 180~s and processed identically to empirical EEG, including filtering, Hilbert-based feature extraction, autoencoder embedding, and flow/metric computation. No parameters are tuned separately for synthetic versus empirical data.
+
+\subsection{Implementation summary}
+\label{sec:impl_summary}
+
+Table~\ref{tab:implementation_summary} summarizes the key implementation parameters. Full details are provided in the Appendix.
+
+\begin{table}[h]
+\centering
+\caption{\textbf{Implementation summary.} Key pipeline parameters for reproducibility.}
+\label{tab:implementation_summary}
+\begin{tabular}{ll}
+\toprule
+\textbf{Parameter} & \textbf{Value} \\
+\midrule
+\multicolumn{2}{l}{\emph{Preprocessing}} \\
+Bandpass filter & 2--48~Hz, zero-phase FIR \\
+Notch filter & 50~Hz (EU line freq.) \\
+Reference & None (original) \\
+Sampling rate & 256~Hz (native) \\
+\midrule
+\multicolumn{2}{l}{\emph{Hilbert extraction}} \\
+Applied to & Continuous data per channel \\
+Edge handling & Mirror padding (1~s) \\
+\midrule
+\multicolumn{2}{l}{\emph{Chunking}} \\
+Chunk duration & 5.0~s (1280 samples) \\
+Chunk overlap & 0\% (non-overlapping) \\
+\midrule
+\multicolumn{2}{l}{\emph{Feature dimensions}} \\
+Input features & $3C$ (cos$\phi$, sin$\phi$, log-amp) \\
+Channels $C$ & 79 (after exclusion) \\
+\midrule
+\multicolumn{2}{l}{\emph{Autoencoder}} \\
+Latent dim $H$ & 64 \\
+Architecture & Transformer (2 layers) \\
+Training subjects & Pooled across all subjects \\
+\midrule
+\multicolumn{2}{l}{\emph{Velocity \& flow}} \\
+$\Delta t$ & 1 sample ($\approx$3.9~ms)$^\dagger$ \\
+Trajectory smoothing & None \\
+Flow-field bins & $30 \times 30$ grid \\
+Min occupancy & $k \geq 10$ points/bin \\
+Kernel smoothing & Gaussian ($\sigma=1$ bin) \\
+\midrule
+\multicolumn{2}{l}{\emph{Embedding}} \\
+Visualization space & PCA (primary), tPCA, delay \\
+Dimensions & 3 (for visualization) \\
+\midrule
+\multicolumn{2}{l}{\emph{Uncertainty}} \\
+Bootstrap iterations & 1000 \\
+Resampling unit & Subject \\
+\bottomrule
+\end{tabular}
+\begin{flushleft}
+\footnotesize{$^\dagger$Results were qualitatively unchanged when velocities were computed after mild temporal smoothing (3-point moving average) or 2$\times$ downsampling.}
+\end{flushleft}
+\end{table}
+
+\subsection{Preprocessing and circular phase--amplitude representation}
+
+Let $\mathbf{x}(t) \in \mathbb{R}^{C}$ denote the multichannel EEG signal. After bandpass filtering (2--48~Hz, zero-phase FIR filter), the analytic signal for each channel is obtained via the Hilbert transform applied to the continuous (unchunked) signal, yielding instantaneous phase $\phi_c(t)$ and amplitude $a_c(t)$ \citet{Boashash1992}.
+
+Instantaneous phase and amplitude are widely used to quantify oscillatory coordination and cross-frequency interactions (e.g., phase--amplitude coupling), and provide a natural starting point for trajectory-centric representations of ongoing EEG \citet{Canolty2006,Tort2010}.
+
+Each channel is represented with three features:
+\begin{equation}
+\mathbf{z}_c(t) = \big[\cos\phi_c(t),\; \sin\phi_c(t),\; \log(1 + a_c(t))\big],
+\end{equation}
+and stacking channels yields the full feature vector $\mathbf{z}(t) \in \mathbb{R}^{3C}$. This representation encodes phase on the unit circle and amplitude on a logarithmic scale, avoiding phase wrap discontinuities while capturing amplitude modulations without dominating the geometry. Unless otherwise stated, all analyses use the combined phase--amplitude representation.
+
+\subsection{Autoencoder for latent trajectories}
+
+An autoencoder maps $\mathbf{z}(t)$ to a latent state $\mathbf{h}(t) \in \mathbb{R}^{H}$ at each time point. Unless otherwise stated, all results are obtained using a reconstruction-only autoencoder trained without supervision. The model is trained with a reconstruction objective:
+\begin{equation}
+\mathcal{L}_{\mathrm{recon}} = \frac{1}{T}\sum_{t=1}^{T}\|\hat{\mathbf{z}}(t) - \mathbf{z}(t)\|_2^2,
+\end{equation}
+with no state labels. The encoder output is interpreted as a continuous latent trajectory over time rather than a single static code.
+
+\paragraph{Autoencoder as a coordinate chart (``learned change of variables'').}
+Throughout, we treat the autoencoder as a nonlinear coordinate transformation (a data-driven ``chart'' on the manifold of EEG features), not as a mechanistic model of neural computation. The goal is to obtain a locally smooth representation that preserves moment-to-moment continuity, after which dynamical quantities (velocity, dwell structure, flow fields) are computed \emph{post hoc} and are not optimized during training. Variants incorporating contrastive regularization are evaluated separately as robustness checks (\secref{app:contrastive_ablation}).
+
+\paragraph{Training and evaluation protocol (circularity control).}
+The autoencoder is trained on pooled data from all subjects using a reconstruction-only objective (no group labels). This pooled training is justified because the AE serves as a coordinate chart, not as a group discriminator: it learns to compress and reconstruct EEG features without access to expert/novice labels during training. All group comparisons reported in Results are computed \emph{after} training, using dynamical metrics (speed, flow) that were not part of the training objective. As an additional control, the ablation study (\secref{app:contrastive_ablation}) demonstrates that results persist when optional contrastive regularization is removed or applied with shuffled labels, confirming that group structure is not artificially induced by representation learning.
+
+\subsection{Embedding, flow-field estimation, and dynamical metrics}
+
+\paragraph{Terminology.}
+To avoid ambiguity, we define the following terms used throughout:
+\begin{itemize}
+    \item \textbf{Latent code} $\mathbf{h}(t) \in \mathbb{R}^{H}$: the autoencoder's bottleneck output at each time point (dimension $H=64$).
+    \item \textbf{Visualization embedding} $\mathbf{y}(t) \in \mathbb{R}^{d}$: a low-dimensional projection of $\mathbf{h}(t)$ for plotting and pooled analysis (typically $d=2$ or $3$), obtained via PCA, tPCA, or delay embedding.
+    \item \textbf{Flow field}: the spatially binned average of velocity vectors $\mathbf{v}(t)$ in the visualization embedding, representing local drift direction and magnitude.
+\end{itemize}
+Unless otherwise stated, dynamical metrics (speed, dwell, flow divergence) are computed in the visualization embedding $\mathbf{y}(t)$.
+
+For visualization and pooled geometric analysis, latent trajectories $\mathbf{h}(t)$ are optionally projected into low-dimensional embeddings $\mathbf{y}(t) \in \mathbb{R}^d$ using PCA, temporal PCA (TPCA), or delay embeddings \citet{Takens1981,Sauer1991}. Discrete velocities are estimated as:
+\begin{equation}
+\mathbf{v}(t) = \frac{\mathbf{y}(t+\Delta t) - \mathbf{y}(t)}{\Delta t}.
+\end{equation}
+
+\subsubsection{Flow-field estimation}
+\label{sec:flow_field_estimation}
+Flow fields are estimated by spatially binning $\mathbf{y}(t)$ and averaging velocity vectors within each bin, yielding a coarse-grained approximation of local dynamical flow. Concretely:
+\begin{itemize}
+    \item The 2D embedding space is discretized into a $30 \times 30$ regular grid.
+    \item Bins with fewer than $k=10$ trajectory points are excluded to ensure reliable local estimates.
+    \item Within each bin, the mean velocity vector $\bar{\mathbf{v}}_{\mathrm{bin}}$ is computed by averaging all $\mathbf{v}(t)$ whose corresponding $\mathbf{y}(t)$ falls in that bin.
+    \item Optional Gaussian smoothing ($\sigma = 1$ bin) is applied to the resulting vector field.
+    \item Divergence is computed via finite differences on the smoothed field:
+    \begin{equation}
+    \nabla \cdot \mathbf{v} \approx \frac{\partial v_x}{\partial x} + \frac{\partial v_y}{\partial y}.
+    \end{equation}
+\end{itemize}
+Results were qualitatively stable across nearby grid resolutions ($25 \times 25$, $40 \times 40$); the $30 \times 30$ grid was chosen as a balance between spatial resolution and bin occupancy.
+
+From trajectories and flow fields, we compute complementary metrics that characterize motion rather than discrete state assignments:
+\begin{itemize}
+    \item \textbf{Mean speed} and \textbf{speed variability}.
+    \item \textbf{Path tortuosity} (curvature proxy) as a measure of directional instability.
+    \item \textbf{Dwell structure}, including dwell durations and occupancy entropy.
+    \item \textbf{Exploration volume} (e.g., variance-based or convex-hull measures in embedding space).
+\end{itemize}
+
+\subsection{Uncertainty quantification}
+We quantify uncertainty using subject-level bootstrapping (resampling subjects with replacement) and report confidence intervals for metric estimates and effect sizes.
+
+\subsection{Robustness across embeddings}
+We repeat metric estimation across PCA, TPCA, and delay embeddings and verify stability of effect direction and magnitude.
+
+\subsection{Latent-space decoding sanity check (interpretability control)}
+To assess whether the learned coordinates preserve interpretable EEG structure, we perform a lightweight ``decode-to-signal'' sanity check: we correlate simple latent-trajectory quantities with conventional EEG summaries (band-limited amplitude and global field power).
+
+Across subjects, latent radius showed moderate positive associations with broadband amplitude ($r\approx 0.30$) and global field power ($r\approx 0.30$), with a weaker association to alpha amplitude ($r\approx 0.15$). Instantaneous latent speed showed the opposite pattern, exhibiting moderate negative associations with broadband amplitude ($r\approx -0.37$) and global field power ($r\approx -0.36$), and a weaker association to alpha amplitude ($r\approx -0.15$). In contrast, individual latent axes (e.g., PC1) exhibited near-zero correlation with these quantities, indicating that the learned representation is not dominated by a trivial power encoding.
+
+Results are summarized in \figref{fig:decoding_sanity_correlations} and an example per-subject scatter is shown in \figref{fig:decoding_sanity_scatter}.
+
+\subsection{Amplitude control and comparison to a linear baseline}
+A remaining concern is whether the primary expertise effect (reduced latent speed) could be fully explained by differences in signal amplitude. We therefore performed two complementary controls.
+
+\paragraph{Partial-correlation control.}
+We tested whether group differences in autoencoder-derived mean speed persist when conditioning on amplitude proxies. The expert/novice association with mean AE speed was attenuated substantially when conditioning on global field power (partial $r\approx 0.10$), but persisted when conditioning on broadband amplitude (partial $r\approx 0.19$), indicating that global signal strength explains part---but not all---of the speed effect.
+
+\paragraph{PCA baseline.}
+We repeated the same amplitude correlations using a simple PCA-only embedding of the circular features. In this linear baseline, correlations between PCA-derived speed and broadband amplitude were weaker ($r\approx -0.13$) than in the autoencoder space (AE speed vs broadband $r\approx -0.51$), and the radius--amplitude association was also weaker in PCA (PCA radius vs broadband $r\approx 0.13$) than in the autoencoder geometry (AE radius vs broadband $r\approx 0.55$). Together, these controls support that (i) amplitude contributes to latent geometry, as expected, but (ii) the autoencoder learns a nontrivial coordinate system in which dynamical quantities are not captured by a simple linear projection.
+
+% =========================
+\section{Validation on Synthetic Systems}
+% =========================
+
+\subsection{Simulation design}
+
+All simulations were generated as multivariate oscillatory time series and processed through the same pipeline as empirical EEG (filtering, Hilbert phase--amplitude feature extraction, autoencoder embedding, flow-field estimation, and metric computation). Ground-truth regime labels were used only for visualization and for stratifying summary statistics; they were not used in model training, embedding, flow estimation, or metric definitions.
+
+\subsection{Does the microscope recover known regime changes?}
+\label{sec:sim_validation}
+
+Figure~\ref{fig:simulations} summarizes validation results on synthetic systems. The key point is that in metastable settings the regimes should not be expected to form clean, separable ``state clusters'' in the embedding. Instead, regimes correspond to \emph{different dynamical organizations of flow on an overlapping manifold}: trajectories may revisit the same regions of latent space, yet differ in local drift directions, speeds, dwell structure, and path geometry.
+
+\FloatBarrier
+\begin{figure*}[!t]
+    \centering
+    \includegraphics[width=1.0\textwidth]{figures/paper1/simulation1_metastable.pdf}
+    \caption{Simulation validation of dynamical regime recovery. (A) Ground-truth regime sequence used for evaluation only. (B) Low-dimensional embedding of latent trajectories colored by regime; trajectories can overlap substantially, indicating that regimes are not necessarily separable by position alone. (C) Density and local flow-field estimates reveal regime-specific directional structure and dwell patterns despite geometric overlap. (D) Example dynamical metrics (e.g., speed, tortuosity, exploration) distinguish regimes by their dynamical organization rather than discrete state occupancy.}
+    \label{fig:simulations}
+\end{figure*}
+\FloatBarrier
+
+Accordingly, in the metastable switching simulation, regimes are defined by distinct dynamical laws acting on a shared latent geometry; trajectories overlap spatially but exhibit regime-specific flow patterns and velocity statistics. The proposed framework recovers these differences using trajectory- and flow-based quantities rather than position alone.
+
+In the stability contrast simulation, the stable regime produces slower, more confined motion, while the exploratory regime produces faster trajectories and broader coverage. These differences are reflected both geometrically (coverage) and dynamically (velocity statistics) in the recovered latent trajectories.
+
+Together, these simulations support that the framework is sensitive to changes in dynamical organization, including cases where regimes are not trivially separable by state occupancy.
+
+Importantly, the recovered latent geometries in these simulations (Figure~\ref{fig:simulation2},Figure~\ref{fig:simulation3},Figure~\ref{fig:simulation4}) resemble qualitative features commonly observed in empirical neural data. In particular, regimes associated with reduced exploration exhibit a contraction of state-space coverage toward a central region, accompanied by slower motion and prolonged dwell, while more exploratory regimes produce broader, more diffuse occupancy. Such patterns mirror empirical observations in resting-state EEG across conditions associated with altered cognitive flexibility or disease, where differences manifest not as distinct state clusters but as changes in the breadth, speed, and organization of latent trajectories. Although the simulations are not intended to model specific biological mechanisms, they demonstrate that the proposed framework is sensitive to dynamical signatures consistent with biologically plausible regime alterations.
+
+% =========================
+% Figure S3
+% =========================
+\FloatBarrier
+\begin{figure*}[!t]
+    \centering
+    \includegraphics[width=0.9\textwidth]{figures/paper1/simulation2_attractor_comparison_3.pdf}
+    \caption{
+    \textbf{Comparison of stabilized and exploratory dynamical regimes on a shared latent manifold (Simulation~2).}
+    \emph{Top row:} Example latent trajectories for a stabilized regime (left) and an exploratory regime (middle), together with an overlay (right), illustrating substantial spatial overlap despite distinct dynamical organization.
+    \emph{Bottom left:} Speed distributions show that the exploratory regime exhibits faster motion on average, while the stabilized regime shows slower dynamics.
+    \emph{Bottom middle:} Spatial density difference (exploratory minus stabilized) highlights regions of preferential visitation despite overlapping support.
+    \emph{Bottom right:} Summary metrics (mean speed, speed variability, tortuosity, explored variance), shown here after normalization for visualization, illustrate how different aspects of trajectory organization can differ across regimes; not all metrics are equally discriminative in this simulation.
+    Overall, the figure demonstrates that regime differences are expressed primarily through dynamical properties of trajectories (speed, exploration, geometry) rather than through positional separation in latent space.
+    }
+    \label{fig:simulation2}
+\end{figure*}
+\FloatBarrier
+
+
+
+% ============================================================
+\section{Empirical Validation: Meditation Expertise}
+\label{sec:meditation}
+% ============================================================
+
+\subsection{Dataset and analysis goal}
+We evaluate whether the proposed dynamical microscope captures differences in resting-state dynamical regimes associated with meditation expertise, using a balanced cohort of $n=12$ experts and $n=12$ novices from an open meditation EEG dataset with experience-sampling probes \citet{BrandmeyerDelorme2016,Delorme2018BIDS}. This dataset is used primarily as a \emph{demonstration of application} on real EEG, rather than as the main methodological validation, which is provided by the synthetic ground-truth systems in \secref{sec:sim_validation}.
+
+The goal is not classification, but to test whether expertise expresses itself as a change in \emph{how} latent trajectories evolve (flow geometry, speed structure, exploration/confinement), even when both groups occupy broadly overlapping regions of latent space.
+
+\subsection{Shared latent manifold with expertise-dependent trajectory organization}
+\label{sec:meditation_shared_manifold}
+Across groups, latent states occupy a largely shared manifold in the pooled embedding, consistent with the idea that both experts and novices express a common repertoire of resting-state configurations. However, the ensemble-level organization differs: density differences and flow-field contrasts reveal systematic reweighting of occupancy and motion structure (see \figref{fig:med_density_diff} and \figref{fig:med_flow_diff}). This pattern supports a regime interpretation in which expertise modifies the dynamics on the manifold (local drift and dwell structure), rather than introducing wholly distinct state clusters.
+
+% 3) Density difference + significance mask (topological story)
+
+\FloatBarrier
+\begin{figure*}[!t]
+    \centering
+    \includegraphics[width=1.0\textwidth]{figures/paper1/density_diff_ci_novice_pca.png}
+    \caption{\textbf{Density differences in latent space (Novice $-$ Expert) with bootstrap significance masking (PCA embedding).}
+    \emph{Left:} mean density difference $\Delta p$ (novice minus expert). \emph{Middle:} regions where the bootstrap 95\% CI for $\Delta p$ excludes zero, indicating consistent occupancy differences across subject resamples. \emph{Right:} uncertainty map (CI width), highlighting where density estimates are less stable. Results indicate a peripheral ring-like region with increased novice occupancy and a relatively more centralized expert occupancy, consistent with a shared manifold but reweighted residence patterns.}
+    \label{fig:med_density_diff}
+\end{figure*}
+\FloatBarrier
+
+
+\subsection{Primary quantitative effect: reduced mean latent speed in experts}
+\label{sec:meditation_speed}
+The strongest and most stable scalar effect is a reduction in mean latent speed for experts relative to novices, with bootstrap confidence intervals indicating a non-trivial group separation (see \figref{fig:med_bootstrap_metrics} and \figref{fig:med_effect_sizes}). In the learned embedding, lower mean speed implies that experts traverse the latent coordinate space more slowly on average. This embedding-level signature is \emph{consistent with} interpretations involving increased metastability or stabilization of dynamics, though direct neurophysiological confirmation would require independent validation (e.g., microstate transition rates or HMM switching statistics). Notably, this effect is expressed as a change in motion statistics rather than an emergence of discrete new states.
+
+\begin{figure*}[t]
+    \centering
+    \includegraphics[width=\linewidth]{figures/paper1/bootstrap_metrics_pca.png}
+    \caption{\textbf{Meditation expertise: flow metrics with subject-level bootstrap 95\% confidence intervals (PCA embedding).}
+    Bars show group means (experts vs novices) with bootstrap CIs computed by resampling subjects. The clearest separation is observed in \emph{mean latent speed}, with experts exhibiting reduced speed relative to novices, consistent with slower trajectory evolution on a shared manifold. Secondary metrics (speed variability, dwell episodes, occupancy entropy, tortuosity, explored variance) show directionally consistent but less certain effects at $n=12$ per group.}
+    \label{fig:med_bootstrap_metrics}
+\end{figure*}
+
+\subsection{Secondary metrics: consistent directions with limited power at $n=12$ per group}
+\label{sec:meditation_secondary_metrics}
+Several additional flow and geometry metrics (dwell episodes, occupancy entropy, path tortuosity, explored variance) show directionally consistent differences between groups, but with wide bootstrap uncertainty at this sample size. Importantly, these secondary metrics do not contradict the main finding: they collectively support the view that expertise influences state-space exploration and residence patterns, while the principal measurable separation in this cohort is carried by speed structure and its spatial organization (see \figref{fig:med_radial_profiles} and \figref{fig:med_dwell_fields}).
+
+\subsection{Spatial structure of motion: radial profiles and dwell fields}
+\label{sec:meditation_spatial_structure}
+Beyond global scalars, expertise differences are spatially structured. Radial profiles computed from the embedding centroid show that group differences in speed are not uniform across state space; novices exhibit elevated speed particularly in peripheral regions, whereas experts show relatively reduced peripheral traversal (see \figref{fig:med_radial_profiles}). Consistent with this, dwell-time fields indicate that experts spend proportionally more time in a more centralized subset of the embedding, while novices show stronger circulation around a peripheral ring-like region (see \figref{fig:med_dwell_fields}). These results strengthen the interpretation that expertise modifies the flow organization (where and how the system moves), not merely the marginal distribution of latent coordinates.
+
+\paragraph{Why the ``ring'' is unlikely to be a simple boundary artifact.}
+A potential concern is that a ring-like density could reflect embedding boundaries or normalization effects (e.g., points ``hitting a wall'' at large radius). However, the radial speed profiles indicate that the peripheral region is not a stagnant boundary accumulation: novices exhibit \emph{increased} speed toward the periphery (\figref{fig:med_radial_profiles}), and flow-field summaries show coherent motion structure rather than purely reflective or random boundary behavior. In the embedding coordinates, peripheral regions are associated with higher velocity and more traversal, while centralized regions are associated with slower residence. Whether this reflects neurophysiological ``stability'' versus ``exploration'' requires independent validation beyond the present analysis.
+
+% 2) Radial profiles (shows *where* differences occur)
+\begin{figure*}[t]
+    \centering
+    \includegraphics[width=\linewidth]{figures/paper1/radial_profiles_pca.png}
+    \caption{\textbf{Radial density and speed profiles with bootstrap 95\% confidence intervals (PCA embedding).}
+    Profiles are computed as a function of radial distance from the pooled embedding centroid. Density profiles summarize how often states at each radius are visited, while speed profiles summarize local motion. Novices exhibit higher speed across much of the manifold, with pronounced differences in peripheral regions, supporting an interpretation of increased peripheral traversal and reduced stabilization relative to experts.}
+    \label{fig:med_radial_profiles}
+\end{figure*}
+
+\subsection{Flow-field differences and directional organization}
+\label{sec:meditation_flow_fields}
+Quiver-based flow-field contrasts further support a dynamical regime difference. The novice--expert vector difference highlights regions where local drift differs systematically between groups, while magnitude and divergence difference maps indicate where motion is faster/slower and where flow tends to expand/contract (see \figref{fig:med_flow_diff}). Directional-entropy analyses suggest that expertise effects are expressed primarily through occupancy and speed modulation rather than an overall loss of directional structure (see \figref{fig:med_directional_entropy}). Taken together, these results indicate that in the learned embedding, meditation expertise is associated with reduced speed and more centralized flow organization. We interpret this as an embedding-level dynamical signature; whether it reflects ``stabilization of intrinsic neural dynamics'' in a mechanistic sense requires independent neurophysiological confirmation.
+
+\subsection{Robustness and interpretation}
+All uncertainty estimates are computed with subject-level bootstrapping, ensuring that confidence intervals reflect between-subject variability rather than within-subject autocorrelation. Because the present cohort is modest ($n=24$), we emphasize effect directions, spatial consistency, and convergence across complementary analyses (density, flow fields, and radial profiles) rather than relying on single-metric significance.
+
+\paragraph{Embedding robustness.}
+The qualitative pattern of reduced expert speed and peripheral/central density reweighting persists across embedding methods (PCA, tPCA, delay embedding). Table~\ref{tab:embedding_robustness} summarizes the sign consistency of key effects. The ring-like peripheral structure in novice occupancy is visible in all three embeddings, though absolute geometry varies. This convergence across projections supports that the main findings reflect properties of the latent trajectories rather than artifacts of a particular embedding choice.
+
+\begin{table}[h]
+\centering
+\caption{\textbf{Embedding robustness summary.} Sign of mean speed difference (novice $-$ expert) across embeddings.}
+\label{tab:embedding_robustness}
+\begin{tabular}{lcc}
+\toprule
+Embedding & Speed diff. sign & Peripheral ring \\
+\midrule
+PCA & $+$ (novice faster) & Yes \\
+tPCA & $+$ (novice faster) & Yes \\
+Delay & $+$ (novice faster) & Yes \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+
+% =========================
+\section{Discussion}
+\label{sec:discussion}
+% =========================
+
+\subsection{Summary of main findings}
+This work introduced a ``dynamical microscope'' for resting-state EEG: a pipeline that transforms multichannel signals into circular phase--amplitude features, learns a compact latent representation with an autoencoder, and quantifies dynamical regimes using trajectory geometry and flow-field statistics. Validation on synthetic dynamical systems demonstrated a central methodological point: regime differences can be expressed in the \emph{laws of motion} on a shared manifold (local drift, speed structure, recurrence, exploration) even when regimes are not cleanly separable by position alone. In empirical validation on a meditation dataset ($n=12$ experts, $n=12$ novices), both groups occupied broadly overlapping regions of latent space, yet differed in trajectory organization. The most robust scalar separation was a reduction in mean latent speed for experts, accompanied by spatially structured differences in occupancy and flow organization (density difference maps, radial speed profiles, and flow-field contrasts).
+
+\subsection{From state occupancy to trajectory laws: what the microscope adds}
+Most resting-state EEG pipelines either (i) average over time to obtain stationary summaries (power spectra, connectivity matrices) or (ii) discretize dynamics into state labels (microstates, HMM states) and compare dwell time or fractional occupancy. These approaches are powerful, but they implicitly privilege \emph{what} states occur over \emph{how} trajectories evolve between and within those states. Our results motivate a complementary emphasis. In both simulations and the meditation dataset, the manifold is largely shared, while group differences appear as systematic changes in motion: speed modulation, peripheral vs central traversal, and flow-field reorganization. This aligns with a metastability view in which conditions can preserve a repertoire of accessible configurations yet differ in switching/transition structure, stability, and exploration.
+
+A conceptual advantage of the dynamical microscope is the joint use of Lagrangian and Eulerian summaries. Time-ordered trajectories capture transient realizations, while density and flow-field estimates characterize ensemble structure by pooling across time and/or subjects. This dual view is particularly appropriate for resting-state EEG, where stochasticity and nonstationarity make any single realization incomplete, and where group differences may be expressed as shifts in the probability flow on a manifold rather than as separable clusters.
+
+\paragraph{The role of the autoencoder: a learned change of coordinates.}
+In this framework, the autoencoder is not used as a classifier or as an end-to-end predictor. Instead, it provides a nonlinear coordinate transformation intended to preserve moment-to-moment variability while reducing dimensionality. The scientific targets are then classical dynamical summaries computed \emph{after} training (trajectory geometry, flow fields, and speed statistics), analogous to analyzing a dynamical system after an explicit change of variables.
+
+\subsection{Interpretation of meditation expertise: reduced speed and centralized flow organization}
+As summarized in Results, experts exhibited reduced mean latent speed and more centralized occupancy relative to novices. These patterns---convergent across density, radial, and flow-field analyses---are consistent with prior work linking meditation expertise to reduced mind wandering \citet{BrandmeyerDelorme2016} and with broader accounts of meditation as modulating attentional stability \citet{Hasenkamp2012,Christoff2009,SmallwoodSchooler2006}.
+
+Relative to Brandmeyer and Delorme's original analysis of this dataset \citet{BrandmeyerDelorme2016}, our results suggest a complementary interpretation: expertise need not manifest as cleanly separable ``states'' in latent space, but can appear primarily as changes in the \emph{kinematics} of ongoing activity (slower transitions and reduced high-speed peripheral excursions) on a shared manifold. Spectral correlates of attentional control reported previously can thus be viewed as signal-level markers of a higher-level dynamical reorganization.
+
+\paragraph{Robustness to training variants.}
+A plausible concern is that representation learning could manufacture apparent group differences through training choices. We therefore emphasize a conservative reading: the key claim is not that experts/novices occupy different \emph{locations}, but that they exhibit different \emph{motion organization} (speed modulation and spatially structured flow) on a largely shared manifold. Robustness checks, including ablation of optional contrastive regularization, are reported in \secref{app:contrastive_ablation}.
+
+One parsimonious interpretation at the \emph{embedding level} is that expertise is associated with reduced trajectory speed and fewer high-speed peripheral excursions. In a metastable landscape picture, peripheral regions may correspond to higher-velocity transition corridors or more exploratory regimes, while central regions may reflect slower ``basin-like'' residence. Under this interpretation, expertise does not necessarily introduce novel states; instead, it modulates how frequently and how rapidly the system traverses different parts of the shared manifold. Importantly, these are \emph{latent-dynamical} interpretations: they characterize trajectory organization in the learned coordinates rather than assigning direct neuroanatomical or mechanistic meaning to any single region of the embedding. Whether this embedding-level pattern reflects ``stabilization of intrinsic neural dynamics'' in a neurophysiological sense would require independent confirmation (e.g., correlation with microstate transition rates or HMM-based switching statistics).
+
+\subsection{Why mean speed emerged as the most stable scalar effect}
+At $n=12$ per group, uncertainty is dominated by between-subject variability, which can be substantial for resting EEG. In this setting, metrics that average local derivatives over time (e.g., mean speed) may be more stable than metrics sensitive to binning and boundary effects (e.g., occupancy entropy), or to the tail behavior of path geometry measures (e.g., tortuosity). The present results reflect this: mean speed showed the clearest separation with bootstrap confidence intervals, whereas several other metrics exhibited directionally consistent effects with wider intervals (\figref{fig:med_bootstrap_metrics}, \figref{fig:med_effect_sizes}). Importantly, the spatial analyses (density differences, radial profiles, flow fields) provide convergent evidence that the speed effect is not merely a global scalar artifact, but reflects structured reorganization of motion across the manifold.
+
+\subsection{Methodological robustness}
+Several aspects of the design were chosen to improve interpretability and reduce common sources of leakage or overclaiming.
+
+\paragraph{Subject-level uncertainty.}
+All confidence intervals are computed via subject-level bootstrapping, which avoids spuriously narrow intervals that would arise from treating highly autocorrelated time points as independent samples.
+
+\paragraph{Shared coordinate system.}
+Embeddings used for pooled geometric analysis are fit in a pooled manner to maintain a shared coordinate system across groups, enabling interpretable density and flow comparisons. This design choice explicitly targets group-level comparability, at the cost of possibly underemphasizing idiosyncratic subject-specific structure.
+
+\paragraph{Separation of representation learning from inference.}
+Although a contrastive term can encourage useful invariances and improve embedding geometry, the downstream analysis does not rely on a classifier objective. The central claims concern dynamical signatures (flow geometry and motion statistics), not classification performance.
+
+\paragraph{Encoder-class robustness (minimal control).}
+A remaining concern is whether the observed dynamical signatures depend on using a transformer autoencoder versus a simpler coordinate map. A minimal and informative control is to repeat the key meditation results (mean speed and radial speed profiles) using a lower-capacity encoder (e.g., linear autoencoder) and/or a non-neural baseline (PCA-only embedding from $\mathbf{z}(t)$). Even if absolute geometry changes, persistence of the relative speed effect would support that the main conclusions are not specific to one encoder class. Add a small supplement table/figure reporting this encoder-class robustness check.
+
+\paragraph{Cross-embedding checks.}
+Because global geometry can depend on embedding choice, key qualitative conclusions should be checked across embeddings (PCA, tPCA, delay) to ensure that the story is not an artifact of a single projection. In this paper, we therefore emphasize findings that are visible both in global metrics and in spatially structured summaries, and we treat any embedding-sensitive effects as exploratory.
+
+\subsection{Limitations}
+\label{sec:limitations}
+This study has several limitations that bound interpretation and motivate future work.
+
+\paragraph{Learned coordinates are not anatomical coordinates.}
+The latent manifold is a learned coordinate system optimized for reconstruction (and mild regularization), not a direct map of neurophysiological sources. Regions of latent space should be interpreted as dynamical configurations in the representation, not as localized brain areas.
+
+A practical way to lower this interpretability barrier is to add a simple ``decode-to-signal'' analysis: select bins/regions of latent space (e.g., central vs peripheral ring), decode representative points through the decoder (or average original samples assigned to each region), and summarize them with conventional EEG features (band power, sensor-level topographies, phase synchrony). This does not assign anatomy to latent axes, but it makes the latent geometry legible in familiar signal-space terms and helps validate that high-impact regions correspond to meaningful electrophysiological structure. In this paper we provide a minimal sanity check based on correlations between latent geometry (radius and speed) and conventional EEG summaries (\figref{fig:decoding_sanity_correlations}, \figref{fig:decoding_sanity_scatter}).
+
+\paragraph{Dependence on preprocessing and representation choices.}
+Hilbert-based phase/amplitude extraction depends on filtering, reference choice, and artifact contamination. Phase estimates can be distorted by muscle activity, eye movements, or non-sinusoidal waveforms, and amplitude features can be dominated by residual artifacts. While circular encoding mitigates phase wrap discontinuities, the representation remains sensitive to preprocessing. 
+
+\paragraph{Chunking and time scale.}
+We used fixed-length chunks (e.g., 5 s) and discrete differencing for velocity. Different chunk sizes and sampling rates may emphasize different temporal scales of dynamics. The current analysis should be interpreted as capturing dynamics at the chosen preprocessing and feature time scale. Future work should test multi-scale consistency (e.g., varying chunk length, or computing flow on multiple downsampled resolutions).
+
+\paragraph{Flow estimation and binning effects.}
+Flow fields are estimated by spatial binning and local averaging, which introduces resolution trade-offs and boundary effects. Density and entropy estimates are also sensitive to binning. We partially address this by focusing on qualitative agreement across multiple summary types (density, radial profiles, flow contrasts) and by reporting uncertainty maps (CI width) where appropriate. A further robustness check would be to repeat maps across multiple grid resolutions and kernel smoothings, showing that the sign and topology of key regions are stable.
+
+\paragraph{Sample size and heterogeneity.}
+The meditation cohort is modest ($n=24$). While mean speed showed the clearest separation, other metrics exhibited wide uncertainty. We therefore emphasize convergent structure (spatial patterns + scalar metrics) rather than single-metric inference. Future work should examine whether the same dynamical signatures replicate in larger meditation datasets and whether they covary with continuous measures of practice intensity, trait mindfulness, or behavioral performance.
+
+\paragraph{Interpretational ambiguity of ``centralization'' and ``ring structure.''}
+Central vs peripheral occupancy in an embedding can reflect multiple factors: true dynamical confinement, variance normalization effects, or embedding-specific geometry. Our claims are therefore framed in dynamical terms (reweighted occupancy and motion organization on a shared manifold) and supported by multiple analyses (density differences + radial speed profiles + flow-field contrasts), but we avoid treating any one geometric motif as uniquely diagnostic without additional validation.
+
+Concretely, to rule out trivial ``boundary'' explanations, key qualitative patterns should be checked under (i) alternative embeddings/projections, (ii) alternative scaling/normalization choices in the pooled space, and (iii) objective ablations (e.g., $\lambda_{\mathrm{con}}=0$). If the peripheral ring were purely a boundary pile-up, one would expect reduced local mobility (low speed) or predominantly reflective motion; instead, the observed elevated peripheral speed and structured flow differences argue against a passive boundary effect.
+
+\subsection{Connections to synthetic validation and generalization beyond meditation}
+The synthetic experiments illustrate that the microscope is designed to detect differences in dynamical organization even when regimes overlap spatially. The meditation results mirror this principle: experts and novices share much of the manifold but differ in motion statistics and flow organization. This alignment between synthetic and empirical findings supports the broader applicability of the method as a dynamical analysis tool rather than a condition-specific feature set.
+
+Beyond meditation, the same framework can be applied to clinical or developmental cohorts where changes may manifest as altered metastability, exploration, or recurrence. Importantly, the microscope naturally supports transitional-regime hypotheses: instead of seeking categorical separations, it can characterize continuous shifts in flow geometry and occupancy structure across a progression (e.g., healthy aging $\rightarrow$ MCI $\rightarrow$ dementia) or across task/brain-state manipulations.
+
+
+A natural dynamical hypothesis suggested by the meditation results is that mental training (expertise) is associated with \emph{reduced} latent speed and more stabilized flow organization, whereas neurodegenerative conditions may exhibit the inverse pattern (increased speed, fragmentation, and reduced recurrence/metastability). This motivates a concrete, falsifiable prediction: along clinical trajectories that impair cognitive control (e.g., healthy aging $\rightarrow$ MCI $\rightarrow$ dementia), dynamical markers derived from latent trajectories should shift toward faster, less organized flow and more exploratory/fragmented motion.
+
+Without presenting clinical data here, we note that in ongoing work on independent clinical EEG cohorts we observe qualitative patterns consistent with this ``stability--instability'' continuum (i.e., slower/stabilized dynamics in training-related contexts versus faster/more irregular dynamics in cognitive-decline contexts). These results will be reported separately, and the present paper should be read as establishing the methodological and conceptual foundation for that clinical application.
+
+\subsection{Concrete additions to consider (for later integration)}
+\begin{itemize}
+    \item \textbf{Artifact-control sensitivity analysis:} repeat the primary figures after stricter artifact rejection and/or alternative referencing; report whether mean speed and density/flow patterns persist.
+    \item \textbf{Split-half reliability:} within each subject, compute metrics on two disjoint halves of the recording to quantify within-subject reliability; report distribution of reliability and its impact on bootstrap uncertainty.
+    \item \textbf{Multi-scale analysis:} repeat flow metrics at different temporal resolutions (e.g., downsampled trajectories; different chunk lengths) to show scale-consistency of the main effects.
+    \item \textbf{Inverse mapping / interpretability:} relate high-density / low-speed regions to input-space summaries (e.g., typical phase synchrony patterns or amplitude envelopes) by decoding representative latent bins back to feature space.
+    \item \textbf{Embedding robustness as a figure/table:} a compact table showing sign consistency of key effects across PCA / tPCA / delay, with a conservative narrative (``qualitatively consistent'').
+    \item \textbf{Continuous covariates:} if available, correlate dynamical metrics with years of practice or meditation hours to complement the binary expert/novice contrast.
+\end{itemize}
+
+% =========================
+\section{Conclusion}
+\label{sec:conclusion}
+% =========================
+We presented a dynamical microscope framework for resting-state EEG that emphasizes continuous trajectories, probability flow, and geometric organization in learned latent spaces. By combining circular phase--amplitude encoding with autoencoder-based representation learning and flow/geometry metrics, the approach characterizes dynamical regimes in terms of \emph{how} neural activity moves through state space, rather than relying primarily on discrete state labels or stationary averages \citet{CahnPolich2006}. A key implication is that trajectory organization offers a unifying language to place mental training and cognitive decline on a shared dynamical spectrum, motivating falsifiable hypotheses for clinical progressions (e.g., MCI). 
+
+Validation on synthetic dynamical systems demonstrated that the framework can recover regime differences expressed as changes in dynamical laws on overlapping manifolds. In an open meditation dataset, experts and novices occupied a largely shared manifold, yet differed in dynamical organization: experts exhibited reduced mean latent speed and a more centralized, stabilized flow organization, while novices showed relatively stronger peripheral traversal and distinct flow-field structure. These findings support a trajectory-centric interpretation of meditation expertise as modulation of metastable dynamics rather than the emergence of distinct new states.
+
+More broadly, the dynamical microscope provides a general-purpose lens for studying nonstationary brain activity and offers a principled route to quantify regime shifts across conditions, tasks, and clinical progressions. Future work will focus on multi-scale robustness, artifact sensitivity, and linking latent flow signatures back to interpretable signal-space patterns and continuous behavioral or clinical measures.
+
+% =========================
+\section*{Acknowledgments}
+% Add funding, contributors, data sources.
+
+% =========================
+\appendix
+\section{Implementation Details}
+% Architecture hyperparameters, training, bootstrap settings, compute environment.
+
+\section{Reproducibility: Commands}
+% Provide command lines that generate figures (paper1/).
+% Example:
+% EEG_DATASET=meditation_bids uv run python scripts/local_analysis/full_dataset_analysis.py
+%   --n-subjects 24 --n-chunks 30 --n-bootstrap 500 --embedding pca --no-show
+
+% =========================
+% Figure 1 (workflow schematic) placeholder
+% =========================
+% \begin{figure}[H]
+%     \centering
+%     \includegraphics[width=\linewidth]{figures/paper1/fig01_workflow.png}
+%     \caption{Workflow schematic of the dynamical microscope framework.}
+%     \label{fig:workflow}
+% \end{figure}
+
+\bibliographystyle{elsarticle-harv}
+% \bibliographystyle{elsarticle-num}
+
+\begin{thebibliography}{00}
+
+\bibitem[Kelso(1995)]{Kelso1995}
+J.~A.~S. Kelso.
+\newblock \emph{Dynamic Patterns: The Self-Organization of Brain and Behavior}.
+\newblock MIT Press, Cambridge, MA, 1995.
+
+\bibitem{Rabinovich2008}
+M.~I. Rabinovich, R.~Huerta, P.~Varona, and V.~S. Afraimovich.
+\newblock Transient cognitive dynamics, metastability, and decision making.
+\newblock \emph{PLoS Computational Biology}, 4(5):e1000072, 2008.
+\newblock doi:10.1371/journal.pcbi.1000072.
+
+\bibitem{TognoliKelso2014}
+E.~Tognoli and J.~A.~S. Kelso.
+\newblock The metastable brain.
+\newblock \emph{Neuron}, 81(1):35--48, 2014.
+\newblock doi:10.1016/j.neuron.2013.12.022.
+
+\bibitem{Breakspear2017}
+M.~Breakspear.
+\newblock Dynamic models of large-scale brain activity.
+\newblock \emph{Nature Neuroscience}, 20(3):340--352, 2017.
+\newblock doi:10.1038/nn.4497.
+
+\bibitem{Deco2017}
+G.~Deco, M.~L. Kringelbach, V.~K. Jirsa, and P.~Ritter.
+\newblock The dynamics of resting fluctuations in the brain: metastability and its dynamical cortical core.
+\newblock \emph{Scientific Reports}, 7:3095, 2017.
+\newblock doi:10.1038/s41598-017-03073-5.
+
+\bibitem{Michel2018}
+C.~M. Michel and T.~Koenig.
+\newblock EEG microstates as a tool for studying the temporal dynamics of whole-brain neuronal networks: a review.
+\newblock \emph{NeuroImage}, 180:577--593, 2018.
+\newblock doi:10.1016/j.neuroimage.2017.11.062.
+
+\bibitem{Baker2014}
+A.~P. Baker, M.~J. Brookes, I.~Rezek, S.~M. Smith, T.~Behrens, J.~Probert, and M.~W. Woolrich.
+\newblock Fast transient networks in spontaneous human brain activity.
+\newblock \emph{eLife}, 3:e01867, 2014.
+\newblock doi:10.7554/eLife.01867.
+
+\bibitem{Vidaurre2018}
+D.~Vidaurre, L.~T. Hunt, A.~J. Quinn, B.~A.~E. Hunt, M.~J. Brookes, A.~C. Nobre, and M.~W. Woolrich.
+\newblock Discovering dynamic brain networks from big data in rest and task.
+\newblock \emph{NeuroImage}, 180:646--656, 2018.
+\newblock doi:10.1016/j.neuroimage.2017.06.077.
+
+\bibitem{Schirrmeister2017}
+R.~T. Schirrmeister, J.~T. Springenberg, L.~D. Fiederer, M.~Glasstetter, K.~Eggensperger, M.~Tangermann, and T.~Ball.
+\newblock Deep learning with convolutional neural networks for EEG decoding and visualization.
+\newblock \emph{Human Brain Mapping}, 38(11):5391--5420, 2017.
+\newblock doi:10.1002/hbm.23730.
+
+\bibitem{Roy2019}
+Y.~Roy, H.~Banville, I.~Albuquerque, A.~Gramfort, T.~H. Falk, and J.~Faubert.
+\newblock Deep learning-based electroencephalography analysis: a systematic review.
+\newblock \emph{Journal of Neural Engineering}, 16(5):051001, 2019.
+\newblock doi:10.1088/1741-2552/ab260c.
+
+\bibitem{Banville2021}
+H.~Banville, O.~Chehab, A.~Hyv{\"a}rinen, D.~A. Engemann, and A.~Gramfort.
+\newblock Uncovering the structure of clinical EEG signals with self-supervised learning.
+\newblock \emph{Journal of Neural Engineering}, 18(4):046020, 2021.
+\newblock doi:10.1088/1741-2552/ac1abb.
+
+\bibitem{Kostas2021}
+D.~Kostas, S.~Aroca-Ouellette, and F.~Rudzicz.
+\newblock BENDR: Using transformers and a contrastive self-supervised learning task to learn from massive amounts of EEG data.
+\newblock \emph{Frontiers in Human Neuroscience}, 15:653659, 2021.
+\newblock doi:10.3389/fnhum.2021.653659.
+
+\bibitem{Marwan2007}
+N.~Marwan, M.~C. Romano, M.~Thiel, and J.~Kurths.
+\newblock Recurrence plots for the analysis of complex systems.
+\newblock \emph{Physics Reports}, 438(5--6):237--329, 2007.
+\newblock doi:10.1016/j.physrep.2006.11.001.
+
+\bibitem{Cavanna2018}
+F.~Cavanna, M.~G. Vilas, M.~Palmucci, and E.~Tagliazucchi.
+\newblock Dynamic functional connectivity and brain metastability during altered states of consciousness.
+\newblock \emph{NeuroImage}, 180:383--395, 2018.
+\newblock doi:10.1016/j.neuroimage.2017.09.065.
+
+\bibitem{Boashash1992}
+B.~Boashash.
+\newblock Estimating and interpreting the instantaneous frequency of a signal.
+\newblock \emph{Proceedings of the IEEE}, 80(4):520--538, 1992.
+
+\bibitem{Canolty2006}
+R.~T. Canolty, E.~Edwards, S.~S. Dalal, M.~Soltani, D.~Nagarajan, H.~E. Kirsch, M.~S. Berger, N.~M. Barbaro, and R.~T. Knight.
+\newblock High gamma power is phase-locked to theta oscillations in human neocortex.
+\newblock \emph{Science}, 313(5793):1626--1628, 2006.
+
+\bibitem{Tort2010}
+A.~B.~L. Tort, R.~Komorowski, H.~Eichenbaum, and N.~Kopell.
+\newblock Measuring phase-amplitude coupling between neuronal oscillations of different frequencies.
+\newblock \emph{Journal of Neurophysiology}, 104(2):1195--1210, 2010.
+
+\bibitem{Hinton2006}
+G.~E. Hinton and R.~R. Salakhutdinov.
+\newblock Reducing the dimensionality of data with neural networks.
+\newblock \emph{Science}, 313(5786):504--507, 2006.
+
+\bibitem{CunninghamYu2014}
+J.~P. Cunningham and B.~M. Yu.
+\newblock Dimensionality reduction for large-scale neural recordings.
+\newblock \emph{Nature Neuroscience}, 17(11):1500--1509, 2014.
+
+\bibitem{Brunton2016}
+S.~L. Brunton, J.~L. Proctor, and J.~N. Kutz.
+\newblock Discovering governing equations from data by sparse identification of nonlinear dynamical systems.
+\newblock \emph{Proceedings of the National Academy of Sciences}, 113(15):3932--3937, 2016.
+
+\bibitem{Chen2018}
+R.~T.~Q. Chen, Y.~Rubanova, J.~Bettencourt, and D.~Duvenaud.
+\newblock Neural ordinary differential equations.
+\newblock In \emph{Advances in Neural Information Processing Systems (NeurIPS)}, 2018.
+
+\bibitem{WilsonCowan1972}
+H.~R. Wilson and J.~D. Cowan.
+\newblock Excitatory and inhibitory interactions in localized populations of model neurons.
+\newblock \emph{Biophysical Journal}, 12(1):1--24, 1972.
+
+\bibitem{JansenRit1995}
+B.~H. Jansen and V.~G. Rit.
+\newblock Electroencephalogram and visual evoked potential generation in a mathematical model of coupled cortical columns.
+\newblock \emph{Biological Cybernetics}, 73(4):357--366, 1995.
+
+\bibitem{SanzLeon2013}
+P.~Sanz Leon, S.~A. Knock, M.~M. Woodman, L.~Domide, J.~Mersmann, A.~R. McIntosh, and V.~K. Jirsa.
+\newblock The Virtual Brain: a simulator of primate brain network dynamics.
+\newblock \emph{Frontiers in Neuroinformatics}, 7:10, 2013.
+
+\bibitem{KingmaWelling2014}
+D.~P. Kingma and M.~Welling.
+\newblock Auto-encoding variational Bayes.
+\newblock In \emph{International Conference on Learning Representations (ICLR)}, 2014.
+
+\bibitem{Pandarinath2018}
+C.~Pandarinath, D.~J. O'Shea, J.~Collins, J.~J. J. J. Smith, P.~B. K. S. J. J. et al.
+\newblock Inferring single-trial neural population dynamics using sequential auto-encoders.
+\newblock \emph{Nature Methods}, 15(10):805--815, 2018.
+
+\bibitem{Takens1981}
+F.~Takens.
+\newblock Detecting strange attractors in turbulence.
+\newblock In D.~A. Rand and L.-S. Young (eds.), \emph{Dynamical Systems and Turbulence, Warwick 1980}, Lecture Notes in Mathematics 898, Springer, 1981.
+
+\bibitem{Sauer1991}
+T.~Sauer, J.~A. Yorke, and M.~Casdagli.
+\newblock Embedology.
+\newblock \emph{Journal of Statistical Physics}, 65(3--4):579--616, 1991.
+
+\bibitem{BrandmeyerDelorme2016}
+T.~Brandmeyer and A.~Delorme.
+\newblock Reduced mind wandering in experienced meditators and associated EEG correlates.
+\newblock \emph{Experimental Brain Research}, 236:2519--2528, 2018.
+\newblock doi:10.1007/s00221-016-4811-5.
+
+\bibitem{Delorme2018BIDS}
+A.~Delorme.
+\newblock BIDS formatted EEG meditation experiment data.
+\newblock \emph{Zenodo}, 2018.
+\newblock doi:10.5281/zenodo.2536267.
+
+\bibitem{Hasenkamp2012}
+W.~Hasenkamp, C.~D. Wilson-Mendenhall, E.~Duncan, and L.~W. Barsalou.
+\newblock Mind wandering and attention during focused meditation: a fine-grained temporal analysis of fluctuating cognitive states.
+\newblock \emph{NeuroImage}, 59(1):750--760, 2012.
+\newblock doi:10.1016/j.neuroimage.2011.07.008.
+
+\bibitem{Christoff2009}
+K.~Christoff, A.~M. Gordon, J.~Smallwood, R.~Smith, and J.~W. Schooler.
+\newblock Experience sampling during fMRI reveals default network and executive system contributions to mind wandering.
+\newblock \emph{Proceedings of the National Academy of Sciences}, 106(21):8719--8724, 2009.
+\newblock doi:10.1073/pnas.0900234106.
+
+\bibitem{Brewer2011}
+J.~A. Brewer, P.~D. Worhunsky, J.~R. Gray, Y.-Y. Tang, J.~Weber, and H.~Kober.
+\newblock Meditation experience is associated with differences in default mode network activity and connectivity.
+\newblock \emph{Proceedings of the National Academy of Sciences}, 108(50):20254--20259, 2011.
+\newblock doi:10.1073/pnas.1112029108.
+
+\bibitem{CahnPolich2006}
+B.~R. Cahn and J.~Polich.
+\newblock Meditation states and traits: EEG, ERP, and neuroimaging studies.
+\newblock \emph{Psychological Bulletin}, 132(2):180--211, 2006.
+\newblock doi:10.1037/0033-2909.132.2.180.
+
+\bibitem{Schmid2010DMD}
+P.~J. Schmid.
+\newblock Dynamic mode decomposition of numerical and experimental data.
+\newblock \emph{Journal of Fluid Mechanics}, 656:5--28, 2010.
+\newblock doi:10.1017/S0022112010001217.
+
+\bibitem{CoifmanLafon2006}
+R.~R. Coifman and S.~Lafon.
+\newblock Diffusion maps.
+\newblock \emph{Applied and Computational Harmonic Analysis}, 21(1):5--30, 2006.
+\newblock doi:10.1016/j.acha.2006.04.006.
+
+\bibitem{SmallwoodSchooler2006}
+J.~Smallwood and J.~W. Schooler.
+\newblock The restless mind.
+\newblock \emph{Psychological Bulletin}, 132(6):946--958, 2006.
+\newblock doi:10.1037/0033-2909.132.6.946.
+
+\bibitem{Krishnan2017Structured}
+R.~G. Krishnan, U.~Shalit, and D.~Sontag.
+\newblock Structured inference networks for nonlinear state space models.
+\newblock In \emph{Proceedings of the AAAI Conference on Artificial Intelligence}, 2017.
+\newblock arXiv:1609.09869.
+
+\bibitem{Linderman2017rSLDS}
+S.~W. Linderman, M.~J. Johnson, A.~C. Miller, R.~P. Adams, D.~M. Blei, L.~Paninski.
+\newblock Bayesian learning and inference in recurrent switching linear dynamical systems.
+\newblock In \emph{Proceedings of the 20th International Conference on Artificial Intelligence and Statistics (AISTATS)}, PMLR 54:914--922, 2017.
+
+% NOTE: \bibliography{references} removed - using thebibliography environment above
+
+% =========================
+% NOTE: \appendix already declared above - do not repeat
+\section{Implementation Details: Simulation}
+% Architecture hyperparameters, training, bootstrap settings, compute environment.
+
+% ============================================================
+\section{Implementation Details for the Meditation Experiment}
+\label{app:meditation_impl}
+% ============================================================
+
+\subsection{Preprocessing and circular phase--amplitude features}
+EEG was bandpass filtered between 2--48~Hz with a 50~Hz notch filter. Data were segmented into non-overlapping 5~s chunks. Instantaneous phase and amplitude were computed using the Hilbert transform. We represented phase on the unit circle and included amplitude with normalization:
+(i) circular phase features $(\cos\phi, \sin\phi)$,
+(ii) amplitude as an additional channel-wise feature (normalized), producing a combined phase--amplitude representation for each time point.
+
+\subsection{Transformer autoencoder architecture}
+\label{app:ae_arch}
+We used a transformer autoencoder with a lightweight configuration designed for stability on modest sample sizes. Concretely, we intentionally used a small model (2 layers, hidden size 64) to reduce capacity and to bias the representation toward smooth, conservative coordinate maps rather than high-capacity function approximation. The encoder used $2$ transformer layers with hidden size $64$, $4$ attention heads, dropout $0.1$, and feedforward dimension $384$. The decoder mirrored the encoder configuration and constrained outputs to respect the circular representation.
+
+\begin{table}[H]
+\centering
+\caption{\textbf{Transformer autoencoder configuration (meditation experiment).}}
+\label{tab:med_ae_config}
+\begin{tabular}{ll}
+\toprule
+Component & Setting \\
+\midrule
+Encoder layers & 2 \\
+Hidden size & 64 \\
+Attention heads & 4 \\
+Feedforward dim & 384 \\
+Dropout & 0.1 \\
+Decoder & mirrors encoder; constrained output \\
+Phase representation & circular \\
+Amplitude & included; normalized \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Training setup and optimization}
+\label{app:training}
+Training used AdamW with weight decay $0.01$ and gradient clipping ($\|\nabla\|_2 \le 1.0$). Batch size was 64 with no gradient accumulation. We used a cosine learning-rate schedule with 10 warmup epochs and a minimum learning rate of $10^{-5}$. Early stopping monitored validation loss (patience 30, minimum delta 0.001). Checkpoints were saved every 20 epochs, including best and last checkpoints.
+
+\paragraph{Learning-rate trajectory (reporting for reviewers).}
+We report the learning-rate evolution to document stable optimization. The base learning rate was $5\times 10^{-4}$ with cosine annealing toward a minimum of $10^{-5}$, following 10 linear warmup epochs. At the best checkpoint (epoch 288, val\_loss = 0.3417), the effective learning rate was approximately $2.77\times 10^{-4}$, representing $\approx 55\%$ of its initial value.Training terminated via early stopping at epoch 322 (patience = 30), with a final learning rate of $\approx 2.33\times 10^{-4}$.
+
+\subsection{Objective and regularization}
+\label{app:loss}
+\paragraph{Default objective (used for main analyses).}
+The default model is fully unsupervised and is trained without contrastive supervision. The objective combined reconstruction with phase- and amplitude-consistent terms, plus mild geometric regularization:
+\begin{itemize}
+    \item Reconstruction loss (MSE) with weight $\lambda_{\mathrm{recon}}=1.0$,
+    \item Phase consistency term with $\lambda_{\mathrm{phase}}=1.0$,
+    \item Amplitude term with $\lambda_{\mathrm{amp}}=0.5$,
+    \item Unit-circle regularizer with $\lambda_{\mathrm{circle}}=0.1$.
+\end{itemize}
+Triplet loss was disabled.
+
+\paragraph{Optional contrastive regularization (robustness only).}
+For robustness checks only (\secref{app:contrastive_ablation}), we additionally tested a contrastive term with $\lambda_{\mathrm{con}}=0.1$ and temperature $0.07$, using condition labels (expert vs novice) or shuffled labels, as described in \secref{app:contrastive_ablation}.
+
+\subsection{Data splits and leakage control}
+We used group-wise splitting by subject to prevent leakage across train/validation/test. Specifically, we used GroupKFold ($n=5$) with grouping by subject, and a held-out test split of 5 subjects (16 train, 3 validation, 5 test; total $n=24$). In this split, the number of chunks was 13{,}644 (train), 2{,}563 (validation), and 3{,}689 (test). All preprocessing and caching were performed consistently across splits.
+
+\subsection{Ablation of contrastive supervision}
+\label{app:contrastive_ablation}
+
+Contrastive supervision was explored as an optional regularizer to encourage invariances and improve embedding geometry. To test whether the reported group differences in latent dynamics depend on contrastive supervision or label information, we conducted a controlled ablation analysis.
+
+Three models were trained using identical architecture, data splits, preprocessing, and optimization schedules:
+\begin{enumerate}
+    \item \emph{Full}: reconstruction plus contrastive loss ($\lambda_{\mathrm{con}} = 0.1$),
+    \item \emph{No contrastive}: reconstruction-only ($\lambda_{\mathrm{con}} = 0$),
+    \item \emph{Shuffled contrastive}: contrastive loss applied with randomized group labels.
+\end{enumerate}
+
+All models were trained to the same epoch (239) with comparable reconstruction performance (best validation MSE $\approx 0.35$ across variants), indicating similar fit quality.
+
+\paragraph{Effect on latent speed differences.}
+Across all variants, the primary group difference in mean latent speed (novice $-$ expert) was preserved with similar magnitude and uncertainty:
+\begin{itemize}
+    \item Full: $\Delta v \approx 0.124$ \; (95\% CI $[-0.053,\,0.285]$), $d \approx 0.55$,
+    \item No contrastive: $\Delta v \approx 0.132$ \; (95\% CI $[-0.077,\,0.316]$), $d \approx 0.53$,
+    \item Shuffled contrastive: $\Delta v \approx 0.121$ \; (95\% CI $[-0.056,\,0.288]$), $d \approx 0.54$.
+\end{itemize}
+
+Effect sizes and confidence intervals overlapped substantially across variants, and reconstruction quality was nearly identical (MSE range: $0.354$--$0.356$).
+
+\paragraph{Interpretation.}
+The persistence of the group effect under both removal of contrastive supervision and randomization of contrastive labels indicates that the observed dynamical difference is not induced by label-based regularization. Instead, it reflects properties of the latent trajectories learned through reconstruction alone.
+
+Notably, the shuffled-contrastive variant produced a result indistinguishable from the fully supervised variant, suggesting that group structure in the contrastive term is not necessary for recovering the reported dynamical signature.
+
+\paragraph{Role of contrastive supervision.}
+For the present dataset, which is relatively small and homogeneous ($n=24$), contrastive supervision does not materially alter the learned dynamical organization or the resulting group comparisons. However, contrastive regularization may still be useful in future applications involving larger, more heterogeneous cohorts (e.g., multi-site or clinical datasets), where aligning latent representations across subjects and recording conditions becomes more challenging.
+
+Importantly, the present results demonstrate that the core dynamical readouts—mean speed, spatial organization of motion, and flow-field structure—do not depend on contrastive supervision and are not an artifact of label information.
+\subsection{Flow-field estimation, metrics, and uncertainty}
+\label{app:flow_metrics}
+Latent trajectories were projected into a pooled embedding (PCA in primary results) fitted on concatenated data from all subjects to ensure a shared coordinate system across groups. Flow fields were estimated via spatial binning and local averaging of displacement vectors. All reported confidence intervals and effect-size intervals were computed by subject-level bootstrapping (resampling subjects with replacement), ensuring uncertainty reflects between-subject variability rather than within-subject temporal autocorrelation.
+
+\subsection{Recommended reproducibility checklist (for reviewers)}
+\begin{itemize}
+    \item Subject-level splits (GroupKFold) and no subject leakage.
+    \item Explicit reporting of preprocessing, chunk duration, and Hilbert extraction.
+    \item Architecture table (\tabref{tab:med_ae_config}) and optimizer/scheduler specification.
+    \item Reporting of learning-rate schedule and early stopping behavior.
+    \item Subject-level bootstrap for uncertainty.
+    \item Clear separation between \emph{representation learning} and \emph{dynamical analysis} (not trained as a classifier).
+\end{itemize}
+
+\section{Figures}
+% =========================
+% Figure S1
+% =========================
+\begin{figure*}[t]
+    \centering
+    \includegraphics[width=\linewidth]{figures/paper1/simulation2_attractor_comparison.pdf}
+    \caption{
+    \textbf{Regime-dependent contraction and expansion of latent state-space coverage (Simulation~2).}
+    \emph{Top row:} Example latent trajectories for a stabilized attractor (left) and an exploratory attractor (middle), together with an overlay (right), illustrating substantial spatial overlap despite differences in dynamical regime.
+    \emph{Bottom left:} Speed distributions indicate slower motion in the stabilized regime and faster motion in the exploratory regime.
+    \emph{Bottom middle:} Spatial density difference (exploratory minus stabilized) highlights centralization of occupancy under reduced exploration and peripheral expansion under exploratory dynamics.
+    \emph{Bottom right:} Selected trajectory metrics (mean speed, speed variability, tortuosity, explored variance), shown here after normalization for visualization, summarize complementary aspects of dynamical organization; individual metrics differ in sensitivity and should not be interpreted as uniformly discriminative.
+    Overall, the figure illustrates how changes in dynamical repertoire can manifest as contraction or expansion of state-space coverage without the emergence of distinct state clusters.
+    }
+    \label{fig:simulation3}
+\end{figure*}
+
+% =========================
+% Figure S2
+% =========================
+\begin{figure*}[t]
+    \centering
+    \includegraphics[width=\linewidth]{figures/paper1/simulation2_attractor_comparison_2.pdf}
+    \caption{
+    \textbf{Comparison of stabilized and exploratory dynamical regimes on a shared latent manifold (Simulation~2).}
+    \emph{Top row:} Latent trajectories generated under a stabilized attractor (left) and an exploratory attractor (middle), with an overlay (right), illustrating substantial spatial overlap despite different dynamical regimes.
+    \emph{Bottom left:} Speed distributions show a clear shift in typical motion between regimes, indicating slower dynamics under stabilization and faster trajectories under exploratory dynamics in this simulation.
+    \emph{Bottom middle:} Spatial density difference (exploratory minus stabilized) highlights contraction of occupancy toward central regions under stabilization and expanded peripheral visitation under exploration.
+    \emph{Bottom right:} Selected trajectory metrics (mean speed, speed variability, tortuosity, explored variance), shown after normalization for visualization, summarize complementary aspects of trajectory organization; individual metrics differ in sensitivity and should not be interpreted as uniformly discriminative.
+    Overall, the figure illustrates that regime differences are expressed through dynamical properties of trajectories and state-space coverage rather than through discrete positional separation.
+    }
+    \label{fig:simulation4}
+\end{figure*}
+
+% -------------------------
+% APPENDIX / SUPPLEMENT (recommended)
+% -------------------------
+
+% A1) Effect sizes with CIs (good but secondary to the above)
+\begin{figure*}[t]
+    \centering
+    \includegraphics[width=\linewidth]{figures/paper1/effect_sizes.png}
+    \caption{\textbf{Effect sizes (Cohen's $d$) with bootstrap confidence intervals for expert vs novice comparisons.}
+    Point estimates and uncertainty are computed via subject-level bootstrapping. Mean speed shows the most reliable separation; other metrics exhibit moderate effect magnitudes but wide intervals at $n=12$ per group.}
+    \label{fig:med_effect_sizes}
+\end{figure*}
+
+% A2) Dwell time fields (useful explanatory figure)
+\begin{figure*}[t]
+    \centering
+    \includegraphics[width=\linewidth]{figures/paper1/dwell_time_fields_pca.png}
+    \caption{\textbf{Dwell time and visit-frequency fields (PCA embedding).}
+    Mean dwell time summarizes how long trajectories remain within local regions of state space, while visit frequency reflects how often regions are entered. Experts show comparatively stronger centralized residence, whereas novices exhibit more prominent peripheral visitation, consistent with the density-difference and radial-profile analyses.}
+    \label{fig:med_dwell_fields}
+\end{figure*}
+
+% 4) Flow-field differences (mechanistic dynamical evidence)
+\begin{figure*}[t]
+    \centering
+    \includegraphics[width=\textwidth,height=0.85\textheight,keepaspectratio]{figures/paper1/flow_difference_pca.png}
+    \caption{\textbf{Flow-field contrasts (Novice $-$ Expert) in latent space (PCA embedding).}
+    \emph{Top:} vector field difference highlighting regions where local drift differs between groups. \emph{Middle:} magnitude difference (red indicates novice faster, blue indicates expert faster). \emph{Bottom:} divergence difference ($+$ expansion / sources, $-$ contraction / sinks) indicating systematic differences in local compressive/expansive flow. Together, these maps suggest that group differences are expressed as changes in local flow organization on a shared manifold, rather than discrete state clusters.}
+    \label{fig:med_flow_diff}
+\end{figure*}
+
+
+% A3) Directional entropy and dominant directions (good control analysis)
+\begin{figure*}[t]
+    \centering
+    \includegraphics[width=\linewidth]{figures/paper1/directional_entropy_pca.png}
+    \caption{\textbf{Directional entropy and dominant drift directions (PCA embedding).}
+    Directional entropy quantifies the dispersion of velocity directions within each spatial bin (0 = highly consistent direction, 1 = highly dispersed). Overlaid dominant-direction quivers summarize mean local drift where directional entropy is low. Patterns indicate that expertise differences primarily modulate speed and occupancy rather than eliminating coherent drift structure.}
+    \label{fig:med_directional_entropy}
+\end{figure*}
+
+% A4) Temporal heterogeneity maps (supporting visualization)
+\begin{figure*}[t]
+    \centering
+    \includegraphics[width=\linewidth]{figures/paper1/temporal_heterogeneity_pca.png}
+    \caption{\textbf{Temporal heterogeneity maps (PCA embedding).}
+    \emph{Left:} spatial map of speed variability (coefficient of variation) summarizing local temporal heterogeneity of motion. \emph{Right:} mean revisit interval indicating how rapidly trajectories return to previously visited regions. These maps provide additional evidence that group differences manifest through spatially structured motion and recurrence, complementing the main density/flow analyses.}
+    \label{fig:med_temporal_heterogeneity}
+\end{figure*}
+
+% A5) Latent decoding sanity check
+\begin{figure*}[t]
+    \centering
+    \includegraphics[width=\linewidth]{figures/paper1/decoding_sanity_correlations.png}
+    \caption{\textbf{Latent decoding sanity check: correlations between latent geometry and classical EEG summaries.}
+    Spearman correlations are computed across subjects between (i) latent radius and (ii) instantaneous latent speed, versus broadband amplitude, alpha amplitude, and global field power (GFP). Radius exhibits moderate positive association with broadband amplitude and GFP, while speed shows moderate negative association, supporting that latent geometry preserves meaningful signal structure without collapsing to a trivial power encoding.}
+    \label{fig:decoding_sanity_correlations}
+\end{figure*}
+
+\begin{figure*}[t]
+    \centering
+    \includegraphics[width=\linewidth]{figures/paper1/decoding_sanity_example_scatter.png}
+    \caption{\textbf{Latent decoding sanity check: example subject-level scatter.}
+    Example scatter illustrating the monotonic relationship between latent geometric quantities and conventional EEG summaries for a representative subject. The relationship is weak-to-moderate and highly dispersed, consistent with a nontrivial abstraction rather than a direct encoding of amplitude.}
+    \label{fig:decoding_sanity_scatter}
+\end{figure*}
+
+% A6) Amplitude control analyses
+\begin{figure*}[t]
+    \centering
+    \includegraphics[width=\linewidth]{figures/paper1/amplitude_control_partial_correlations.png}
+    \caption{\textbf{Amplitude control: partial correlations.}
+    Partial-correlation control analysis testing whether group differences in autoencoder-derived mean speed persist after conditioning on amplitude proxies (broadband amplitude and GFP). The expert/novice association is attenuated by conditioning, but remains nonzero under broadband conditioning, indicating that amplitude explains part---but not all---of the latent-speed effect.}
+    \label{fig:amplitude_control_partial}
+\end{figure*}
+
+\begin{figure*}[t]
+    \centering
+    \includegraphics[width=\linewidth]{figures/paper1/amplitude_control_group_differences.png}
+    \caption{\textbf{Amplitude control: group differences with and without amplitude conditioning.}
+    Summary of group differences in mean AE speed under raw and amplitude-conditioned comparisons, illustrating attenuation under conditioning and persistence of a residual difference under broadband control.}
+    \label{fig:amplitude_control_group}
+\end{figure*}
+
+\begin{figure*}[t]
+    \centering
+    \includegraphics[width=\linewidth]{figures/paper1/amplitude_control_pca_baseline.png}
+    \caption{\textbf{Amplitude control: PCA baseline comparison.}
+    Comparison of amplitude correlations in the autoencoder embedding versus a PCA-only embedding on the same circular features. PCA-derived speed and radius show weaker correlations with amplitude than their autoencoder counterparts, supporting that the autoencoder learns a nontrivial coordinate system beyond a linear projection.}
+    \label{fig:amplitude_control_pca}
+\end{figure*}
+
+
+
+\end{document}

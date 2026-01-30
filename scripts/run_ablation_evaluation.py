@@ -35,22 +35,29 @@ from scipy import stats
 from tqdm import tqdm
 
 # Add paths
-sys.path.insert(0, str(Path(__file__).parent))
-sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
+SCRIPT_DIR = Path(__file__).parent
+sys.path.insert(0, str(SCRIPT_DIR))
+sys.path.insert(0, str(SCRIPT_DIR.parent / "src"))
+sys.path.insert(0, str(SCRIPT_DIR / "local_analysis"))
 
 
-def find_checkpoint(variant_dir: Path) -> Optional[Path]:
-    """Find best checkpoint in variant output directory."""
+def find_checkpoint(variant_dir: Path, checkpoint_name: str = "best.pt") -> Optional[Path]:
+    """Find checkpoint in variant output directory.
+
+    Args:
+        variant_dir: Directory containing variant outputs
+        checkpoint_name: Name of checkpoint file (e.g., "best.pt", "epoch_240.pt")
+    """
     # Check common locations
     candidates = [
-        variant_dir / "checkpoints" / "best.pt",
-        variant_dir / "best.pt",
+        variant_dir / "checkpoints" / checkpoint_name,
+        variant_dir / checkpoint_name,
     ]
 
     # Also search subdirectories (Hydra creates timestamped dirs)
     for subdir in variant_dir.iterdir():
         if subdir.is_dir():
-            candidates.append(subdir / "checkpoints" / "best.pt")
+            candidates.append(subdir / "checkpoints" / checkpoint_name)
 
     for path in candidates:
         if path.exists():
@@ -100,13 +107,13 @@ def compute_latent_speed_analysis(
 
     Returns dict with speed statistics and bootstrap CIs.
     """
-    from scripts.local_analysis.load_model import (
+    from local_analysis.load_model import (
         load_model_from_checkpoint,
         create_model,
         compute_latent_trajectory,
     )
-    from scripts.local_analysis.load_data import load_eeg_from_file, extract_phase_circular
-    from scripts.local_analysis import config as cfg
+    from local_analysis.load_data import load_eeg_from_file, extract_phase_circular
+    from local_analysis import config as cfg
 
     # Setup config for meditation
     cfg.DATASET = "meditation_bids"
@@ -139,7 +146,7 @@ def compute_latent_speed_analysis(
 
     for group_key, subjects in groups.items():
         for file_path, label, group_name, subject_id in tqdm(
-            subjects, desc=f"Processing {group_name}", leave=False
+            subjects, desc=f"Processing {group_key}", leave=False
         ):
             try:
                 # Load and process
@@ -340,6 +347,12 @@ def main():
         default=["full", "no_contrastive", "shuffled_contrastive"],
         help="Variants to evaluate",
     )
+    parser.add_argument(
+        "--checkpoint_name",
+        type=str,
+        default="best.pt",
+        help="Checkpoint filename to use (e.g., 'best.pt', 'epoch_240.pt')",
+    )
 
     args = parser.parse_args()
 
@@ -368,9 +381,9 @@ def main():
         variant_dir = args.ablation_dir / variant
 
         # Find checkpoint
-        checkpoint_path = find_checkpoint(variant_dir)
+        checkpoint_path = find_checkpoint(variant_dir, args.checkpoint_name)
         if checkpoint_path is None:
-            print(f"  WARNING: No checkpoint found for {variant}, skipping")
+            print(f"  WARNING: No checkpoint '{args.checkpoint_name}' found for {variant}, skipping")
             continue
 
         print(f"  Checkpoint: {checkpoint_path}")
