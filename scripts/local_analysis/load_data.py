@@ -400,12 +400,13 @@ def load_model_and_compute_trajectories(
 
             with torch.no_grad():
                 for chunk in result["chunks"]:
-                    # Prepare input
+                    # Prepare input: chunk is (n_features, n_samples)
+                    # Model expects (batch, n_features, time)
                     x = torch.from_numpy(chunk).unsqueeze(0).to(device)
-                    x = x.permute(0, 2, 1)  # (batch, time, features)
+                    # x is now (1, n_features, n_samples) = (batch, features, time) - correct!
 
                     # Get latent
-                    latent = model.encode(x)  # (batch, time, hidden)
+                    latent = model.encode(x)  # (batch, time', hidden)
                     subject_latents.append(latent.squeeze(0).cpu().numpy())
 
                     if return_amplitudes and include_amplitude:
