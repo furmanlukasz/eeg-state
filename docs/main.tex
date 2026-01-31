@@ -98,6 +98,9 @@ We adopt a trajectory-centric dynamical-systems view and introduce a framework d
     \item Systematic controls addressing phase representation validity, amplitude confounds, and embedding/binning choices (Appendix).
 \end{itemize}
 
+\paragraph{A note on the role of the autoencoder.}
+The autoencoder is used as a \emph{nonlinear change of variables}---a data-driven coordinate chart on the manifold of EEG features---not as a model of neural computation. The goal is to obtain locally smooth coordinates that preserve moment-to-moment continuity, after which dynamical quantities (velocity, dwell structure, flow fields) are computed \emph{post hoc} and are not optimized during training. This framing distinguishes our approach from classification-oriented deep learning: we do not claim the latent space has neurophysiological meaning, only that it provides a useful coordinate system for quantifying trajectory organization.
+
 \begin{figure*}[t]
     \centering
     \includegraphics[width=0.95\textwidth]{figures/paper1/fig01_workflow.png}
