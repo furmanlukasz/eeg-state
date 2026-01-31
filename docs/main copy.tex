@@ -84,7 +84,7 @@ The novel contribution lies in \emph{continuous-trajectory quantities} that do n
     \item \textbf{Speed variability (CV)}: local kinematics variability that quantifies how intermittently fast or slow the system moves, beyond simple ``more or fewer switches.''
     \item \textbf{Flow-field geometry}: spatially resolved drift structure showing \emph{where} and \emph{how} trajectories move, not just which regions are occupied.
 \end{itemize}
-These quantities are not directly available from standard discrete-state summaries and require explicit continuous-trajectory representations.
+These quantities require continuous latent trajectories; they cannot be computed from a symbol sequence alone without moving toward probability-trajectory geometry---which is precisely the approach class we introduce.
 
 \subsection{Summary of contributions}
 
@@ -357,7 +357,10 @@ Several additional flow and geometry metrics (dwell episodes, occupancy entropy,
 
 \subsection{Spatial structure of motion: radial profiles and dwell fields}
 \label{sec:meditation_spatial_structure}
-Beyond global scalars, expertise differences are spatially structured. Radial profiles computed from the embedding centroid show that group differences in speed are not uniform across state space; novices exhibit elevated speed particularly in peripheral regions, whereas experts show relatively reduced peripheral traversal (see \figref{fig:med_radial_profiles}). Consistent with this, dwell-time fields indicate that experts spend proportionally more time in a more centralized subset of the embedding, while novices show stronger circulation around a peripheral ring-like region (see \figref{fig:med_dwell_fields}). These results strengthen the interpretation that expertise modifies the trajectory laws (where and how the system moves), not merely the marginal distribution of latent coordinates.
+Beyond global scalars, expertise differences are spatially structured. Radial profiles computed from the embedding centroid show that group differences in speed are not uniform across state space; novices exhibit elevated speed particularly in peripheral regions, whereas experts show relatively reduced peripheral traversal (see \figref{fig:med_radial_profiles}). Consistent with this, dwell-time fields indicate that experts spend proportionally more time in a more centralized subset of the embedding, while novices show stronger circulation around a peripheral ring-like region (see \figref{fig:med_dwell_fields}). These results strengthen the interpretation that expertise modifies the flow organization (where and how the system moves), not merely the marginal distribution of latent coordinates.
+
+\paragraph{Why the ``ring'' is unlikely to be a simple boundary artifact.}
+A ring-like density could reflect embedding boundaries or normalization effects (e.g., points ``hitting a wall'' at large radius). However, radial speed profiles indicate that the peripheral region is not a stagnant boundary accumulation: novices exhibit \emph{increased} speed toward the periphery (\figref{fig:med_radial_profiles}), and flow-field summaries show coherent motion structure rather than purely reflective or random boundary behavior. In the embedding coordinates, peripheral regions are associated with higher velocity and more traversal, while centralized regions are associated with slower residence. Whether this reflects neurophysiological ``stability'' versus ``exploration'' requires independent validation beyond the present analysis. Throughout, ``central'' and ``peripheral'' refer strictly to relative position within the learned embedding and should not be interpreted as attractor depth or stability in a mechanistic sense.
 
 % 2) Radial profiles (shows *where* differences occur)
 \begin{figure}[t]
@@ -406,14 +409,14 @@ This work introduced a ``dynamical microscope'' for resting-state EEG: a pipelin
 At $n=12$ per group, uncertainty is dominated by between-subject variability, which can be substantial for resting EEG. In this setting, metrics that average local derivatives over time (e.g., mean speed) may be more stable than metrics sensitive to binning and boundary effects (e.g., occupancy entropy), or to the tail behavior of path geometry measures (e.g., tortuosity). The present results reflect this: mean speed showed the clearest separation with bootstrap confidence intervals, whereas several other metrics exhibited directionally consistent effects with wider intervals (\figref{fig:med_bootstrap_metrics}, \figref{fig:med_effect_sizes}). Importantly, the spatial analyses (density differences, radial profiles, flow fields) provide convergent evidence that the speed effect is not merely a global scalar artifact, but reflects structured reorganization of motion across the manifold.
 
 \subsection{From state occupancy to trajectory laws: what the microscope adds}
-Most resting-state EEG pipelines either (i) average over time to obtain stationary summaries (power spectra, connectivity matrices) or (ii) discretize dynamics into state labels (microstates, HMM states) and compare dwell time or fractional occupancy. These approaches are powerful, but they implicitly privilege \emph{what} states occur over \emph{how} trajectories evolve between and within those states. Our results motivate a complementary emphasis. In both simulations and the meditation dataset, group differences appear as systematic changes in motion (speed modulation, peripheral vs central traversal, flow-field reorganization) rather than positional separation. This aligns with a metastability view in which conditions can preserve a repertoire of accessible configurations yet differ in switching/transition structure, stability, and exploration.
+Most resting-state EEG pipelines either (i) average over time to obtain stationary summaries (power spectra, connectivity matrices) or (ii) discretize dynamics into state labels (microstates, HMM states) and compare dwell time or fractional occupancy. These approaches are powerful, but they implicitly privilege \emph{what} states occur over \emph{how} trajectories evolve between and within those states. Our results motivate a complementary emphasis. In both simulations and the meditation dataset, the manifold is largely shared, while group differences appear as systematic changes in motion: speed modulation, peripheral vs central traversal, and flow-field reorganization. This aligns with a metastability view in which conditions can preserve a repertoire of accessible configurations yet differ in switching/transition structure, stability, and exploration.
 
 A conceptual advantage of the dynamical microscope is the joint use of Lagrangian and Eulerian summaries. Time-ordered trajectories capture transient realizations, while density and flow-field estimates characterize ensemble structure by pooling across time and/or subjects. This dual view is particularly appropriate for resting-state EEG, where stochasticity and nonstationarity make any single realization incomplete, and where group differences may be expressed as shifts in the probability flow on a manifold rather than as separable clusters.
 
-\subsection{Interpretation of meditation expertise: altered trajectory laws}
+\subsection{Interpretation of meditation expertise: reduced speed and centralized flow organization}
 As summarized in Results, experts exhibited reduced mean latent speed and more centralized occupancy relative to novices. These patterns---convergent across density, radial, and flow-field analyses---are consistent with prior work linking meditation expertise to reduced mind wandering \citep{BrandmeyerDelorme2016} and with broader accounts of meditation as modulating attentional stability \citep{Hasenkamp2012,Christoff2009,SmallwoodSchooler2006}.
 
-Relative to Brandmeyer and Delorme's original analysis of this dataset \citep{BrandmeyerDelorme2016}, our results suggest a complementary interpretation: expertise manifests primarily as changes in the \emph{kinematics} of ongoing activity (slower transitions and reduced high-speed peripheral excursions) rather than cleanly separable states. Spectral correlates of attentional control reported previously can thus be viewed as signal-level markers of a higher-level dynamical reorganization.
+Relative to Brandmeyer and Delorme's original analysis of this dataset \citep{BrandmeyerDelorme2016}, our results suggest a complementary interpretation: expertise need not manifest as cleanly separable ``states'' in latent space, but can appear primarily as changes in the \emph{kinematics} of ongoing activity (slower transitions and reduced high-speed peripheral excursions) on a shared manifold. Spectral correlates of attentional control reported previously can thus be viewed as signal-level markers of a higher-level dynamical reorganization.
 
 \paragraph{Robustness to training variants.}
 Representation learning could in principle manufacture apparent group differences through training choices. We therefore emphasize a conservative reading: the key claim is not that experts/novices occupy different \emph{locations}, but that they exhibit different \emph{motion organization} (speed modulation and spatially structured flow) on a largely shared manifold. Robustness checks, including ablation of optional contrastive regularization, are reported in \secref{app:contrastive_ablation}.
@@ -463,7 +466,7 @@ Flow fields are estimated by spatial binning and local averaging in the 2D proje
 The meditation cohort is modest ($n=24$). While mean speed showed the clearest separation, other metrics exhibited wide uncertainty. We therefore emphasize convergent structure (spatial patterns + scalar metrics) rather than single-metric inference. Future work should examine whether the same dynamical signatures replicate in larger meditation datasets and whether they covary with continuous measures of practice intensity, trait mindfulness, or behavioral performance.
 
 \paragraph{Interpretational ambiguity of ``centralization'' and ``ring structure.''}
-Central vs peripheral occupancy in an embedding can reflect multiple factors: true dynamical confinement, variance normalization effects, or embedding-specific geometry. A ring-like density could reflect boundary effects (points ``hitting a wall'' at large radius). However, radial speed profiles indicate that peripheral regions are not stagnant boundary accumulations: novices exhibit \emph{increased} speed toward the periphery, and flow-field summaries show coherent motion structure rather than purely reflective or random boundary behavior. Our claims are therefore framed in dynamical terms (reweighted occupancy and trajectory laws) and supported by convergent analyses; we avoid treating any one geometric motif as uniquely diagnostic. Throughout, ``central'' and ``peripheral'' refer strictly to relative position within the learned embedding and should not be interpreted as attractor depth or stability in a mechanistic sense.
+Central vs peripheral occupancy in an embedding can reflect multiple factors: true dynamical confinement, variance normalization effects, or embedding-specific geometry. Our claims are therefore framed in dynamical terms (reweighted occupancy and motion organization on a shared manifold) and supported by multiple analyses (density differences + radial speed profiles + flow-field contrasts), but we avoid treating any one geometric motif as uniquely diagnostic without additional validation. As discussed in Results (\secref{sec:meditation_spatial_structure}), elevated peripheral speed and structured flow differences argue against a passive boundary artifact.
 
 \subsection{Connections to synthetic validation and generalization beyond meditation}
 The synthetic experiments illustrate that the microscope is designed to detect differences in dynamical organization even when regimes overlap spatially. The meditation results mirror this principle: experts and novices share much of the manifold but differ in motion statistics and flow organization. The synthetic systems are not intended as mechanistic models of meditation, but as demonstrations of how shared manifolds with differing flow organization can arise; this alignment supports the broader applicability of the method as a dynamical analysis tool rather than a condition-specific feature set.
@@ -693,8 +696,22 @@ Flow metrics decompose cleanly into two classes:
 \end{enumerate}
 This decomposition clarifies the relationship between discrete-state and continuous-trajectory descriptions by explicitly delineating overlapping and orthogonal components.
 
-\paragraph{Correlation analysis.}
-Several flow metrics showed strong correlations with HMM statistics (Mean Speed $\leftrightarrow$ Dwell Time/Transitions, $|r| \approx 0.85$--$0.90$; Speed CV $\leftrightarrow$ Transition Entropy, $|r| \approx 0.60$). This overlap is expected: mean speed is a continuous analogue of switching rate. Crucially, \textbf{explored variance} exhibited consistently low correlations with all HMM metrics (max $|r| < 0.30$), demonstrating that it encodes information not available from discrete state summaries---specifically, the geometric spread and dynamic range of continuous trajectories that HMMs cannot represent without becoming continuous-trajectory models themselves.
+\paragraph{What overlaps (and that is fine).}
+Several flow metrics showed strong correlations with HMM statistics:
+\begin{itemize}
+    \item Mean Speed $\leftrightarrow$ Mean Dwell Time / N Transitions ($|r| \approx 0.85$--$0.90$)
+    \item Speed CV $\leftrightarrow$ Transition Entropy ($|r| \approx 0.60$)
+\end{itemize}
+This overlap is \emph{expected and clarifying}: mean speed is a continuous analogue of switching rate, and speed CV captures variability in switching behavior. If we did not observe these correlations, reviewers would be suspicious that our metrics were disconnected from established dynamics.
+
+\paragraph{What is genuinely not in HMM (the key result).}
+Crucially, \textbf{explored variance} exhibited consistently low correlations with all HMM metrics across both datasets (max $|r| < 0.30$), demonstrating that it encodes information not available from discrete state summaries. An HMM can count visits, transitions, and dwell times, but it \emph{cannot} represent:
+\begin{itemize}
+    \item The geometric spread of trajectories within and between states
+    \item The continuous dynamic range of motion
+    \item Path geometry (two trajectories can visit the same states but take different routes)
+\end{itemize}
+To recover explored variance from an HMM, one would need continuous latent states, state-conditioned covariance geometry, and trajectory integration---at which point it is no longer a ``discrete state method.''
 
 \paragraph{Why $\Delta$AUC $\approx 0$ is not a problem.}
 Incremental classification analyses showed no improvement in AUC when adding flow metrics to HMM features ($\Delta$AUC $\approx 0$, CI includes zero). This is \emph{expected} and does not indicate redundancy. Classification improvement is not evidence of representational uniqueness. The fact that $\Delta$AUC $\approx 0$ \emph{but} explored variance is orthogonal to HMM metrics means flow metrics encode structure \emph{not aligned with the classification boundary}---i.e., descriptive rather than discriminative information. That is precisely what a dynamical microscope should provide.
@@ -717,7 +734,7 @@ Trans. Ent. & \textbf{0.85} & \textbf{0.60} & 0.47 & 0.16 & 0.24 \\
 \end{table}
 
 \paragraph{Summary.}
-Some flow metrics are continuous versions of HMM statistics (expected); explored variance quantifies trajectory geometry not recoverable from state sequences alone (novel). The goal is dynamical description, not classification.
+This analysis establishes three points: (1) overlap exists where expected, grounding our metrics in established dynamics; (2) explored variance constitutes a genuinely novel contribution not reducible to discrete-state summaries; and (3) classification is not the goal---the aim is representation and dynamical description. Some flow metrics are continuous versions of HMM statistics; others quantify continuous trajectory geometry that cannot be recovered from state sequences alone.
 
 % =========================
 % Figure 1 (workflow schematic) placeholder
@@ -1127,6 +1144,9 @@ Projected $\mathbf{y}(t)$ & PCA 2D speed & $-0.75$ & $[-1.57, -0.19]$ \\
 \bottomrule
 \end{tabular}
 \end{table}
+
+\paragraph{Flow fields remain illustrative.}
+Flow-field maps, divergence, and occupancy entropy are computed in the 2D projection for visualization and are explicitly treated as illustrative rather than quantitative claims. The primary quantitative claims (speed differences, effect sizes) are supported by projection-invariant and scale-robust metrics in the full latent space.
 
 \section{Figures}
 
