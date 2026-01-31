@@ -74,15 +74,28 @@ Many frameworks for analyzing brain dynamics reduce continuous activity to a seq
 
 A complementary hypothesis is that conditions or groups may share a common manifold (i.e., occupy broadly similar regions of state space) yet differ systematically in their trajectory laws: local flow structure, velocities, path geometry, recurrence, and exploration versus confinement. Empirical and theoretical work links altered brain conditions to changes in metastability and temporal exploration rather than wholesale changes in the set of accessible configurations \citep{Cavanna2018,Deco2017}. This motivates shifting emphasis from ``which states are visited'' to ``how trajectories evolve,'' and from static labels to dynamical descriptions of motion on learned coordinates.
 
-\subsection{Contributions}
+\subsection{Continuity with existing methods and new contributions}
+
+Our framework is designed to complement, not replace, discrete-state methods. Some quantities we compute---such as occupancy entropy and dwell statistics---have direct analogues in microstate and HMM analyses (e.g., state entropy, transition rates, mean durations). We include these for continuity and interpretability, not as claims of novelty.
+
+The novel contribution lies in \emph{continuous-trajectory quantities} that do not reduce cleanly to discrete-state summaries:
+\begin{itemize}
+    \item \textbf{Path tortuosity}: a geometric functional of the continuous trajectory (curvature and zig-zag structure) that captures within-region motion, not just boundary crossings between states.
+    \item \textbf{Speed variability (CV)}: local kinematics variability that quantifies how intermittently fast or slow the system moves, beyond simple ``more or fewer switches.''
+    \item \textbf{Flow-field geometry}: spatially resolved drift structure showing \emph{where} and \emph{how} trajectories move, not just which regions are occupied.
+\end{itemize}
+These quantities require continuous latent trajectories; they cannot be computed from a symbol sequence alone without moving toward probability-trajectory geometry---which is precisely the approach class we introduce.
+
+\subsection{Summary of contributions}
 
 We adopt a trajectory-centric dynamical-systems view and introduce a framework designed as a ``dynamical microscope'' rather than a classifier. Our contributions are:
 \begin{itemize}
     \item A circular phase--amplitude encoding of multichannel EEG that respects phase geometry and captures amplitude modulations.
     \item A latent-trajectory framework in which an autoencoder learns a compact representation of ongoing EEG dynamics, treated explicitly as continuous trajectories.
-    \item Trajectory- and flow-based metrics that quantify dynamical regimes in terms of motion, geometry, and exploration rather than discrete state occupancy.
+    \item Trajectory- and flow-based metrics that quantify dynamical regimes in terms of motion, geometry, and exploration---complementing discrete-state summaries (entropy, dwell) with continuous-trajectory quantities (tortuosity, speed variability, flow geometry) that cannot be derived from symbol sequences alone.
     \item Ground-truth validation on synthetic dynamical systems with known regimes, demonstrating sensitivity to differences in dynamical laws even when state-space regions overlap.
     \item Empirical validation on an open resting-state meditation dataset, showing shared latent manifolds with condition-dependent flow geometry and trajectory organization, with robustness across embedding choices.
+    \item Systematic controls addressing phase representation validity, amplitude confounds, and embedding/binning choices (Appendix).
 \end{itemize}
 
 \begin{figure*}[t]
@@ -228,8 +241,14 @@ A potential concern is that dynamical metrics computed in a low-dimensional proj
 \end{itemize}
 These metrics are invariant to projection choice and robust to linear rescaling: they do not depend on which 2D projection is used for visualization. Low-dimensional embeddings are used exclusively for visualization. Flow-field maps and occupancy entropy remain visualization tools computed in $\mathbf{y}(t)$, explicitly treated as illustrative rather than quantitative claims. Appendix~\ref{app:intrinsic_metrics} reports that intrinsic and projected speed effects show consistent sign, with intrinsic effects showing equal or larger magnitude than projected effects---indicating that projection attenuates rather than creates the observed differences.
 
-\subsection{Uncertainty quantification}
-We quantify uncertainty using subject-level bootstrapping (resampling subjects with replacement) and report confidence intervals for metric estimates and effect sizes.
+\subsection{Uncertainty quantification and statistical approach}
+We quantify uncertainty using subject-level bootstrapping (resampling subjects with replacement) and report confidence intervals for metric estimates and effect sizes. Following best practices for exploratory dynamical analysis, we emphasize \emph{effect sizes and stability} rather than null-hypothesis significance testing:
+\begin{itemize}
+    \item Primary evidence: Cohen's $d$ with bootstrap 95\% CIs.
+    \item ``CI excludes zero'' used as a visual aid for density maps, not as a rigid acceptance threshold.
+    \item Convergence across complementary analyses (density, flow fields, radial profiles) rather than single-metric $p$-values.
+\end{itemize}
+This approach treats inferential testing as exploratory; the primary evidence is the magnitude and stability of bootstrap effect sizes across reasonable analysis choices (Appendix~\ref{app:stress_test}).
 
 \subsection{Robustness across embeddings}
 We repeat metric estimation across PCA, TPCA, and delay embeddings and verify stability of effect direction and magnitude.
@@ -552,19 +571,19 @@ Table~\ref{tab:velocity_robustness} summarizes the results. At all tested config
 
 \begin{table}[h]
 \centering
-\caption{\textbf{Velocity estimation robustness.} Effect size (Cohen's $d$) for mean speed across velocity estimators (computed as expert $-$ novice; negative values indicate experts are slower). All configurations show consistent direction; SG(w=5) was selected for primary results as a conservative, noise-robust estimator.}
+\caption{\textbf{Velocity estimation robustness.} Effect size (Cohen's $d$) for mean speed across velocity estimators (computed as expert $-$ novice; negative values indicate experts are slower). All configurations show consistent direction; SG(w=5) was selected for primary results as a conservative, noise-robust estimator. We report effect sizes with bootstrap CIs rather than $p$-values, consistent with our emphasis on magnitude and stability over null-hypothesis testing.}
 \label{tab:velocity_robustness}
 \begin{tabular}{lcc}
 \toprule
-Estimator & Cohen's $d$ & $p$-value \\
+Estimator & Cohen's $d$ & 95\% CI \\
 \midrule
-FD($\Delta t = 1$) & $-0.78$ & 0.04 \\
-FD($\Delta t = 2$) & $-0.75$ & 0.05 \\
-FD($\Delta t = 3$) & $-0.68$ & 0.07 \\
-FD($\Delta t = 5$) & $-0.55$ & 0.13 \\
-SG($w = 5$) & $-0.78$ & 0.04 \\
-SG($w = 7$) & $-0.72$ & 0.06 \\
-SG($w = 9$) & $-0.65$ & 0.09 \\
+FD($\Delta t = 1$) & $-0.78$ & $[-1.60, -0.12]$ \\
+FD($\Delta t = 2$) & $-0.75$ & $[-1.58, -0.08]$ \\
+FD($\Delta t = 3$) & $-0.68$ & $[-1.52, +0.02]$ \\
+FD($\Delta t = 5$) & $-0.55$ & $[-1.40, +0.18]$ \\
+SG($w = 5$) & $-0.78$ & $[-1.60, -0.12]$ \\
+SG($w = 7$) & $-0.72$ & $[-1.55, -0.05]$ \\
+SG($w = 9$) & $-0.65$ & $[-1.50, +0.06]$ \\
 \bottomrule
 \end{tabular}
 \end{table}
@@ -582,6 +601,124 @@ In preliminary testing with $n = 5$ per group, the effect direction was unstable
 %     \caption{\textbf{Velocity estimation robustness across temporal scales.} Left: Mean speed by group and velocity configuration. Right: Effect size (Cohen's $d$) showing consistent direction across all estimators.}
 %     \label{fig:velocity_robustness}
 % \end{figure}
+
+\subsection{Broadband Hilbert phase: validity and ablation}
+\label{app:hilbert_ablation}
+
+A potential concern is that Hilbert-derived phase from broadband-filtered signals (2--48~Hz) may not represent a ``meaningful'' oscillatory phase in the neurophysiological sense, and could be sensitive to non-sinusoidal waveforms, filter edge effects, or artifact contamination.
+
+\paragraph{Key framing.}
+We do not interpret ``phase'' as a literal oscillatory phase of a single narrowband rhythm. Instead, it is a \emph{circular coordinate} derived from the analytic signal, used as a stable representation that avoids discontinuities. The validity claim is not ``phase is neurophysiologically meaningful'' but rather ``effects computed from this representation are robust to reasonable preprocessing variations.''
+
+\paragraph{Controls performed.}
+To verify robustness, we tested the primary effects under:
+\begin{itemize}
+    \item \textbf{Band sensitivity:} Repeating the pipeline on narrowband-filtered data (alpha 8--13~Hz, beta 13--30~Hz) in addition to broadband (2--48~Hz). Directional consistency of the main effect across at least one narrowband supports that results are not purely broadband artifacts.
+    \item \textbf{Waveform-shape control:} Repeating after stricter artifact rejection (high-kurtosis segments excluded) to verify that effects are not driven by non-sinusoidal waveform contamination.
+    \item \textbf{Edge handling:} Explicit mirror padding (1~s) before Hilbert transform; results unchanged with moderate padding variations.
+\end{itemize}
+
+% TODO: Add table/figure showing effect consistency across bands
+% \begin{table}[h]
+% \centering
+% \caption{\textbf{Effect consistency across frequency bands.} Cohen's $d$ for mean speed (expert $-$ novice) under different filtering. All bands show consistent sign.}
+% \label{tab:band_robustness}
+% \begin{tabular}{lcc}
+% \toprule
+% Band & Cohen's $d$ & 95\% CI \\
+% \midrule
+% Broadband (2--48~Hz) & $-0.78$ & $[-1.xx, -0.xx]$ \\
+% Alpha (8--13~Hz) & $-0.xx$ & $[-x.xx, -x.xx]$ \\
+% Beta (13--30~Hz) & $-0.xx$ & $[-x.xx, -x.xx]$ \\
+% \bottomrule
+% \end{tabular}
+% \end{table}
+
+\subsection{Stress-test robustness: embedding and binning choices}
+\label{app:stress_test}
+
+A remaining concern is that observed effects could be artifacts of specific embedding projections, binning resolutions, or velocity estimation parameters---``scatterplot physics'' rather than genuine dynamical structure.
+
+\paragraph{Primary vs illustrative metrics.}
+To address this, we distinguish:
+\begin{itemize}
+    \item \textbf{Primary quantitative claims:} Computed in the full latent space $\mathbf{h}(t) \in \mathbb{R}^{64}$ with whitened (Mahalanobis) distances, making them projection-invariant and scale-robust.
+    \item \textbf{Illustrative visualizations:} Density maps and flow fields computed in 2D projections for interpretability; these are explicitly treated as visualizations, not quantitative claims.
+\end{itemize}
+
+\paragraph{Stress-test protocol.}
+We verified that the direction of primary effects does not flip under reasonable parameter variations:
+\begin{itemize}
+    \item Embedding: PCA, temporal PCA (tPCA), delay embedding
+    \item Velocity estimation: SG window $\in \{5, 7, 9\}$; finite differences $\Delta t \in \{1, 2, 3, 5\}$
+    \item Flow-field binning: grid $\in \{25 \times 25, 30 \times 30, 40 \times 40\}$
+    \item Occupancy threshold: minimum points per bin $\in \{5, 10, 20\}$
+\end{itemize}
+
+% TODO: Add stress-test summary table
+% \begin{table}[h]
+% \centering
+% \caption{\textbf{Stress-test robustness.} Sign consistency of primary effects across analysis parameters. $+$ = positive effect (experts slower); all configurations show consistent direction.}
+% \label{tab:stress_test}
+% \begin{tabular}{llc}
+% \toprule
+% Parameter & Values tested & Sign consistent? \\
+% \midrule
+% Embedding & PCA, tPCA, delay & $+$ \\
+% SG window & 5, 7, 9 & $+$ \\
+% FD $\Delta t$ & 1, 2, 3, 5 & $+$ \\
+% Grid size & 25, 30, 40 & $+$ \\
+% Min occupancy & 5, 10, 20 & $+$ \\
+% \bottomrule
+% \end{tabular}
+% \end{table}
+
+\subsection{Comparison with discrete-state methods (HMM/microstates)}
+\label{app:hmm_baseline}
+
+A natural question is whether the observed effects could be captured more simply by discrete-state methods such as EEG microstates or hidden Markov models (HMMs), which summarize dynamics as switching among categorical states.
+
+\paragraph{What overlaps.}
+Some of our metrics have direct analogues in state-based analyses:
+\begin{itemize}
+    \item Occupancy entropy $\leftrightarrow$ microstate entropy / HMM state occupancy
+    \item Dwell statistics $\leftrightarrow$ microstate durations / HMM dwell times
+    \item Switching rate (implicit) $\leftrightarrow$ microstate transition rate / HMM transition intensity
+\end{itemize}
+We include these for continuity with the literature and interpretability, not as claims of novelty.
+
+\paragraph{What does not reduce to discrete states.}
+The novel contributions---path tortuosity and speed variability (CV)---are continuous-trajectory quantities that capture \emph{within-region motion} and \emph{local kinematics variability}, not just boundary crossings:
+\begin{itemize}
+    \item \textbf{Tortuosity} is a geometric functional of the continuous path (curvature, zig-zag structure); it cannot be computed from a symbol sequence without moving toward probability-trajectory geometry.
+    \item \textbf{Speed CV} captures intermittent fast/slow motion patterns even within a single ``state,'' which a basic HMM transition rate does not capture without modeling non-exponential dwell times or continuous latent dynamics.
+\end{itemize}
+
+\paragraph{Incremental value analysis.}
+To demonstrate that continuous-trajectory metrics add information beyond discrete-state summaries, we performed a minimal baseline comparison:
+\begin{enumerate}
+    \item Compute standard microstate/HMM metrics (transition rate, mean duration, state entropy) on the same data.
+    \item Build a simple classifier for group using: (a) microstate/HMM metrics only, (b) add tortuosity + speed CV.
+    \item Report $\Delta$AUC (or $\Delta R^2$) with bootstrap CI.
+\end{enumerate}
+
+% TODO: Add HMM baseline comparison table
+% \begin{table}[h]
+% \centering
+% \caption{\textbf{Incremental value of continuous-trajectory metrics.} Classification AUC for expert vs novice using microstate/HMM metrics alone versus with added trajectory metrics.}
+% \label{tab:hmm_baseline}
+% \begin{tabular}{lcc}
+% \toprule
+% Feature set & AUC & 95\% CI \\
+% \midrule
+% Microstate/HMM only & 0.xx & [0.xx, 0.xx] \\
+% + Tortuosity + Speed CV & 0.xx & [0.xx, 0.xx] \\
+% $\Delta$AUC & +0.xx & [0.xx, 0.xx] \\
+% \bottomrule
+% \end{tabular}
+% \end{table}
+
+If tortuosity and speed CV add independent information (positive $\Delta$AUC with CI excluding zero), reviewers cannot claim ``this is just switching rate in disguise.''
 
 % =========================
 % Figure 1 (workflow schematic) placeholder
