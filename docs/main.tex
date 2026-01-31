@@ -148,59 +148,7 @@ All simulations are generated at 250~Hz for 180~s and processed identically to e
 \subsection{Implementation summary}
 \label{sec:impl_summary}
 
-Table~\ref{tab:implementation_summary} summarizes the key implementation parameters. Full details are provided in the Appendix.
-
-\begin{table}[h]
-\centering
-\caption{\textbf{Implementation summary.} Key pipeline parameters for reproducibility.}
-\label{tab:implementation_summary}
-\begin{tabular}{ll}
-\toprule
-\textbf{Parameter} & \textbf{Value} \\
-\midrule
-\multicolumn{2}{l}{\emph{Preprocessing}} \\
-Bandpass filter & 2--48~Hz, zero-phase FIR \\
-Notch filter & 50~Hz (EU line freq.) \\
-Reference & None (original) \\
-Sampling rate & 256~Hz (native) \\
-\midrule
-\multicolumn{2}{l}{\emph{Hilbert extraction}} \\
-Applied to & Continuous data per channel \\
-Edge handling & Mirror padding (1~s) \\
-\midrule
-\multicolumn{2}{l}{\emph{Chunking}} \\
-Chunk duration & 5.0~s (1280 samples) \\
-Chunk overlap & 0\% (non-overlapping) \\
-\midrule
-\multicolumn{2}{l}{\emph{Feature dimensions}} \\
-Input features & $3C$ (cos$\phi$, sin$\phi$, log-amp) \\
-Channels $C$ & 79 (after exclusion) \\
-\midrule
-\multicolumn{2}{l}{\emph{Autoencoder}} \\
-Latent dim $H$ & 64 \\
-Architecture & Transformer (2 layers) \\
-Training subjects & Pooled across all subjects \\
-\midrule
-\multicolumn{2}{l}{\emph{Velocity \& flow}} \\
-Velocity estimation & Savitzky--Golay derivative$^\dagger$ \\
-SG parameters & window=5, polyorder=2 \\
-Flow-field bins & $30 \times 30$ grid \\
-Min occupancy & $k \geq 10$ points/bin \\
-Kernel smoothing & Gaussian ($\sigma=1$ bin) \\
-\midrule
-\multicolumn{2}{l}{\emph{Embedding}} \\
-Visualization space & PCA (primary), tPCA, delay \\
-Dimensions & 3 (for visualization) \\
-\midrule
-\multicolumn{2}{l}{\emph{Uncertainty}} \\
-Bootstrap iterations & 1000 \\
-Resampling unit & Subject \\
-\bottomrule
-\end{tabular}
-\begin{flushleft}
-\footnotesize{$^\dagger$Savitzky--Golay provides noise-robust derivative estimation; results were qualitatively unchanged with finite differences ($\Delta t \in \{1,2,3\}$ samples) or alternative SG windows (see Appendix).}
-\end{flushleft}
-\end{table}
+Table~\ref{tab:implementation_summary} (Appendix) summarizes the key implementation parameters. Full details are provided in the Appendix.
 
 \subsection{Preprocessing and circular phase--amplitude representation}
 
@@ -271,14 +219,14 @@ From trajectories and flow fields, we compute complementary metrics that charact
     \item \textbf{Exploration volume} (e.g., variance-based or convex-hull measures in embedding space).
 \end{itemize}
 
-\paragraph{Intrinsic metrics in full latent space (coordinate invariance).}
-A potential concern is that dynamical metrics computed in a low-dimensional projection $\mathbf{y}(t)$ may depend on the choice of embedding. To address this, we compute primary scalar metrics directly in the full latent space $\mathbf{h}(t) \in \mathbb{R}^{64}$:
+\paragraph{Intrinsic metrics in full latent space (projection and scale robustness).}
+A potential concern is that dynamical metrics computed in a low-dimensional projection $\mathbf{y}(t)$ may depend on the choice of embedding. To address this, primary dynamical metrics (speed, tortuosity, explored variance) are computed directly in the full latent space $\mathbf{h}(t) \in \mathbb{R}^{64}$. Here ``intrinsic'' refers to quantities computed directly on the learned latent trajectory that are invariant to projection choice and robust to linear rescaling; we do not claim invariance to arbitrary nonlinear reparameterizations of the latent space. To reduce dependence on latent scaling, speed is additionally evaluated using standardized and whitened coordinates:
 \begin{itemize}
     \item \textbf{Euclidean speed}: $\|\mathbf{h}(t+\Delta t) - \mathbf{h}(t)\|_2$, using Savitzky--Golay derivatives.
-    \item \textbf{Whitened speed}: $\sqrt{(\Delta\mathbf{h})^\top \Sigma^{-1} (\Delta\mathbf{h})}$, where $\Sigma$ is the pooled covariance, making distances invariant to linear rescaling of latent dimensions.
-    \item \textbf{Path tortuosity} and \textbf{explored variance}: computed from full $\mathbf{h}(t)$ geometry.
+    \item \textbf{Z-scored speed}: each latent dimension normalized by its pooled standard deviation.
+    \item \textbf{Whitened speed}: $\sqrt{(\Delta\mathbf{h})^\top \Sigma^{-1} (\Delta\mathbf{h})}$, where $\Sigma$ is the pooled covariance, making distances robust to linear rescaling of latent dimensions.
 \end{itemize}
-These \emph{intrinsic} metrics do not depend on which 2D projection is used for visualization. Flow-field maps and occupancy entropy remain visualization tools computed in $\mathbf{y}(t)$, explicitly treated as illustrative rather than quantitative claims. Appendix~\ref{app:intrinsic_metrics} reports that intrinsic and projected speed effects show consistent sign and comparable magnitude, confirming that the main findings are not artifacts of a specific projection choice.
+These metrics are invariant to projection choice and robust to linear rescaling: they do not depend on which 2D projection is used for visualization. Low-dimensional embeddings are used exclusively for visualization. Flow-field maps and occupancy entropy remain visualization tools computed in $\mathbf{y}(t)$, explicitly treated as illustrative rather than quantitative claims. Appendix~\ref{app:intrinsic_metrics} reports that intrinsic and projected speed effects show consistent sign, with intrinsic effects showing equal or larger magnitude than projected effects---indicating that projection attenuates rather than creates the observed differences.
 
 \subsection{Uncertainty quantification}
 We quantify uncertainty using subject-level bootstrapping (resampling subjects with replacement) and report confidence intervals for metric estimates and effect sizes.
@@ -309,14 +257,7 @@ All simulations were generated as multivariate oscillatory time series and proce
 
 Figure~\ref{fig:simulations} summarizes validation results on synthetic systems. The key point is that in metastable settings the regimes should not be expected to form clean, separable ``state clusters'' in the embedding. Instead, regimes correspond to \emph{different dynamical organizations of flow on an overlapping manifold}: trajectories may revisit the same regions of latent space, yet differ in local drift directions, speeds, dwell structure, and path geometry.
 
-\FloatBarrier
-\begin{figure*}[!t]
-    \centering
-    \includegraphics[width=1.0\textwidth]{figures/paper1/simulation1_metastable.pdf}
-    \caption{Simulation validation of dynamical regime recovery. (A) Ground-truth regime sequence used for evaluation only. (B) Low-dimensional embedding of latent trajectories colored by regime; trajectories can overlap substantially, indicating that regimes are not necessarily separable by position alone. (C) Density and local flow-field estimates reveal regime-specific directional structure and dwell patterns despite geometric overlap. (D) Example dynamical metrics (e.g., speed, tortuosity, exploration) distinguish regimes by their dynamical organization rather than discrete state occupancy.}
-    \label{fig:simulations}
-\end{figure*}
-\FloatBarrier
+% Figure moved to appendix (Figure~\ref{fig:simulations})
 
 Accordingly, in the metastable switching simulation, regimes are defined by distinct dynamical laws acting on a shared latent geometry; trajectories overlap spatially but exhibit regime-specific flow patterns and velocity statistics. The proposed framework recovers these differences using trajectory- and flow-based quantities rather than position alone.
 
@@ -330,9 +271,9 @@ Importantly, the recovered latent geometries in these simulations (Figure~\ref{f
 % Figure S3
 % =========================
 \FloatBarrier
-\begin{figure*}[!t]
+\begin{figure}[!t]
     \centering
-    \includegraphics[width=0.9\textwidth]{figures/paper1/simulation2_attractor_comparison_3.pdf}
+    \includegraphics[width=\columnwidth]{figures/paper1/simulation2_attractor_comparison_3.pdf}
     \caption{
     \textbf{Comparison of stabilized and exploratory dynamical regimes on a shared latent manifold (Simulation~2).}
     \emph{Top row:} Example latent trajectories for a stabilized regime (left) and an exploratory regime (middle), together with an overlay (right), illustrating substantial spatial overlap despite distinct dynamical organization.
@@ -342,7 +283,7 @@ Importantly, the recovered latent geometries in these simulations (Figure~\ref{f
     Overall, the figure demonstrates that regime differences are expressed primarily through dynamical properties of trajectories (speed, exploration, geometry) rather than through positional separation in latent space.
     }
     \label{fig:simulation2}
-\end{figure*}
+\end{figure}
 \FloatBarrier
 
 
@@ -376,15 +317,17 @@ Across groups, latent states occupy a largely shared manifold in the pooled embe
 
 \subsection{Primary quantitative effect: reduced mean latent speed in experts}
 \label{sec:meditation_speed}
-The strongest and most stable scalar effect is a reduction in mean latent speed for experts relative to novices (Cohen's $d = -0.78$, 95\% CI $[-1.57, -0.19]$), with bootstrap confidence intervals indicating a non-trivial group separation (see \figref{fig:med_bootstrap_metrics} and \figref{fig:med_effect_sizes}). Speed was computed using Savitzky--Golay derivatives (window = 5 samples) to suppress high-frequency jitter while preserving trajectory curvature; robustness across alternative velocity estimators is reported in Appendix~\ref{app:velocity_robustness}. In the learned embedding, lower mean speed implies that experts traverse the latent coordinate space more slowly on average. This embedding-level signature is \emph{consistent with} interpretations involving increased metastability or stabilization of dynamics, though direct neurophysiological confirmation would require independent validation (e.g., microstate transition rates or HMM switching statistics). Notably, this effect is expressed as a change in motion statistics rather than an emergence of discrete new states.
+The strongest and most stable scalar effect is a reduction in mean latent speed for experts relative to novices. Critically, the expert--novice difference in mean speed was \emph{larger} in the full latent space than in 2D projections, and was stable across Euclidean, standardized, and whitened metrics (Table~\ref{tab:intrinsic_vs_projected}), indicating that the effect reflects intrinsic trajectory dynamics rather than projection-induced geometry. In the 2D PCA embedding, this corresponds to Cohen's $d = -0.78$ (95\% CI $[-1.57, -0.19]$); in the full latent space with whitened distances, $d = -0.88$ (95\% CI $[-1.89, -0.20]$). See \figref{fig:med_bootstrap_metrics} and \figref{fig:med_effect_sizes} for visualization.
 
-\begin{figure*}[t]
+Speed was computed using Savitzky--Golay derivatives (window = 5 samples) to suppress high-frequency jitter while preserving trajectory curvature; robustness across alternative velocity estimators is reported in Appendix~\ref{app:velocity_robustness}. In the learned embedding, lower mean speed implies that experts traverse the latent coordinate space more slowly on average. This embedding-level signature is \emph{consistent with} interpretations involving increased metastability or stabilization of dynamics, though direct neurophysiological confirmation would require independent validation (e.g., microstate transition rates or HMM switching statistics). Notably, this effect is expressed as a change in motion statistics rather than an emergence of discrete new states.
+
+\begin{figure}[t]
     \centering
-    \includegraphics[width=\linewidth]{figures/paper1/bootstrap_metrics_pca.png}
+    \includegraphics[width=\columnwidth]{figures/paper1/bootstrap_metrics_pca.png}
     \caption{\textbf{Meditation expertise: flow metrics with subject-level bootstrap 95\% confidence intervals (PCA embedding).}
     Bars show group means (experts vs novices) with bootstrap CIs computed by resampling subjects. The clearest separation is observed in \emph{mean latent speed}, with experts exhibiting reduced speed relative to novices, consistent with slower trajectory evolution on a shared manifold. Secondary metrics (speed variability, dwell episodes, occupancy entropy, tortuosity, explored variance) show directionally consistent but less certain effects at $n=12$ per group.}
     \label{fig:med_bootstrap_metrics}
-\end{figure*}
+\end{figure}
 
 \subsection{Secondary metrics: consistent directions with limited power at $n=12$ per group}
 \label{sec:meditation_secondary_metrics}
@@ -398,13 +341,13 @@ Beyond global scalars, expertise differences are spatially structured. Radial pr
 A potential concern is that a ring-like density could reflect embedding boundaries or normalization effects (e.g., points ``hitting a wall'' at large radius). However, the radial speed profiles indicate that the peripheral region is not a stagnant boundary accumulation: novices exhibit \emph{increased} speed toward the periphery (\figref{fig:med_radial_profiles}), and flow-field summaries show coherent motion structure rather than purely reflective or random boundary behavior. In the embedding coordinates, peripheral regions are associated with higher velocity and more traversal, while centralized regions are associated with slower residence. Whether this reflects neurophysiological ``stability'' versus ``exploration'' requires independent validation beyond the present analysis. Throughout, ``central'' and ``peripheral'' refer strictly to relative position within the learned embedding and should not be interpreted as attractor depth or stability in a mechanistic sense.
 
 % 2) Radial profiles (shows *where* differences occur)
-\begin{figure*}[t]
+\begin{figure}[t]
     \centering
-    \includegraphics[width=\linewidth]{figures/paper1/radial_profiles_pca.png}
+    \includegraphics[width=\columnwidth]{figures/paper1/radial_profiles_pca.png}
     \caption{\textbf{Radial density and speed profiles with bootstrap 95\% confidence intervals (PCA embedding).}
     Profiles are computed as a function of radial distance from the pooled embedding centroid. Density profiles summarize how often states at each radius are visited, while speed profiles summarize local motion. Novices exhibit higher speed across much of the manifold, with pronounced differences in peripheral regions, supporting an interpretation of increased peripheral traversal and reduced stabilization relative to experts.}
     \label{fig:med_radial_profiles}
-\end{figure*}
+\end{figure}
 
 \subsection{Flow-field differences and directional organization}
 \label{sec:meditation_flow_fields}
@@ -476,6 +419,9 @@ A remaining concern is whether the observed dynamical signatures depend on using
 \paragraph{Cross-embedding checks.}
 Because global geometry can depend on embedding choice, key qualitative conclusions should be checked across embeddings (PCA, tPCA, delay) to ensure that the story is not an artifact of a single projection. In this paper, we therefore emphasize findings that are visible both in global metrics and in spatially structured summaries, and we treat any embedding-sensitive effects as exploratory.
 
+\paragraph{Projection invariance of primary effects.}
+A potential concern is that dynamical metrics computed in 2D projections could reflect ``scatterplot physics''---artifacts of the projection rather than intrinsic trajectory properties. To address this, primary scalar metrics were computed in the full 64-dimensional latent space using Euclidean, standardized (z-scored), and whitened (Mahalanobis-like) distance metrics. As reported in Table~\ref{tab:intrinsic_vs_projected}, the expert--novice speed difference is \emph{larger} in the full latent space than in 2D projections and is stable across all three metric variants. This demonstrates that projection to two dimensions attenuates but does not create the observed dynamical differences, arguing against a projection-artifact interpretation. The consistency across Euclidean, z-scored, and whitened metrics further indicates that the effect is not driven by arbitrary axis scaling or latent anisotropy.
+
 \subsection{Limitations}
 \label{sec:limitations}
 This study has several limitations that bound interpretation and motivate future work.
@@ -492,7 +438,7 @@ Hilbert-based phase/amplitude extraction depends on filtering, reference choice,
 We used fixed-length chunks (e.g., 5 s) and Savitzky--Golay smoothed derivatives for velocity. Velocity estimation from sampled trajectories is inherently scale-dependent: at very fine temporal resolutions ($\Delta t = 1$ sample), estimates are dominated by high-frequency jitter, while coarser scales capture mesoscale flow. As shown in Appendix~\ref{app:velocity_robustness}, the direction of group effects is consistent across velocity estimators, but absolute magnitudes vary with temporal scale. The current analysis should be interpreted as capturing dynamics at the chosen preprocessing and feature time scale. Future work should test multi-scale consistency (e.g., varying chunk length, or computing flow on multiple downsampled resolutions).
 
 \paragraph{Flow estimation and binning effects.}
-Flow fields are estimated by spatial binning and local averaging in the 2D projection, which introduces resolution trade-offs and boundary effects. Density and entropy estimates are also sensitive to binning. We explicitly treat flow-field visualizations as \emph{illustrative} rather than quantitative claims; primary quantitative effects (speed, tortuosity) are computed in the full latent space using coordinate-invariant (whitened) metrics (\secref{app:intrinsic_metrics}). We partially address projection dependence by focusing on qualitative agreement across multiple summary types (density, radial profiles, flow contrasts) and by verifying that intrinsic and projected metrics show consistent effect direction.
+Flow fields are estimated by spatial binning and local averaging in the 2D projection, which introduces resolution trade-offs and boundary effects. Density and entropy estimates are also sensitive to binning. We explicitly treat flow-field visualizations as \emph{illustrative} rather than quantitative claims; primary quantitative effects (speed, tortuosity) are computed in the full latent space using projection-invariant and scale-robust (whitened) metrics (Appendix~\ref{app:intrinsic_metrics}). We partially address projection dependence by focusing on qualitative agreement across multiple summary types (density, radial profiles, flow contrasts) and by verifying that intrinsic and projected metrics show consistent effect direction.
 
 \paragraph{Sample size and heterogeneity.}
 The meditation cohort is modest ($n=24$). While mean speed showed the clearest separation, other metrics exhibited wide uncertainty. We therefore emphasize convergent structure (spatial patterns + scalar metrics) rather than single-metric inference. Future work should examine whether the same dynamical signatures replicate in larger meditation datasets and whether they covary with continuous measures of practice intensity, trait mindfulness, or behavioral performance.
@@ -530,7 +476,59 @@ More broadly, the dynamical microscope provides a general-purpose lens for study
 % =========================
 \appendix
 \section{Implementation Details}
-% Architecture hyperparameters, training, bootstrap settings, compute environment.
+\label{app:implementation}
+
+\begin{table}[h]
+\centering
+\caption{\textbf{Implementation summary.} Key pipeline parameters for reproducibility.}
+\label{tab:implementation_summary}
+\begin{tabular}{ll}
+\toprule
+\textbf{Parameter} & \textbf{Value} \\
+\midrule
+\multicolumn{2}{l}{\emph{Preprocessing}} \\
+Bandpass filter & 2--48~Hz, zero-phase FIR \\
+Notch filter & 50~Hz (EU line freq.) \\
+Reference & None (original) \\
+Sampling rate & 256~Hz (native) \\
+\midrule
+\multicolumn{2}{l}{\emph{Hilbert extraction}} \\
+Applied to & Continuous data per channel \\
+Edge handling & Mirror padding (1~s) \\
+\midrule
+\multicolumn{2}{l}{\emph{Chunking}} \\
+Chunk duration & 5.0~s (1280 samples) \\
+Chunk overlap & 0\% (non-overlapping) \\
+\midrule
+\multicolumn{2}{l}{\emph{Feature dimensions}} \\
+Input features & $3C$ (cos$\phi$, sin$\phi$, log-amp) \\
+Channels $C$ & 79 (after exclusion) \\
+\midrule
+\multicolumn{2}{l}{\emph{Autoencoder}} \\
+Latent dim $H$ & 64 \\
+Architecture & Transformer (2 layers) \\
+Training subjects & Pooled across all subjects \\
+\midrule
+\multicolumn{2}{l}{\emph{Velocity \& flow}} \\
+Velocity estimation & Savitzky--Golay derivative$^\dagger$ \\
+SG parameters & window=5, polyorder=2 \\
+Flow-field bins & $30 \times 30$ grid \\
+Min occupancy & $k \geq 10$ points/bin \\
+Kernel smoothing & Gaussian ($\sigma=1$ bin) \\
+\midrule
+\multicolumn{2}{l}{\emph{Embedding}} \\
+Visualization space & PCA (primary), tPCA, delay \\
+Dimensions & 3 (for visualization) \\
+\midrule
+\multicolumn{2}{l}{\emph{Uncertainty}} \\
+Bootstrap iterations & 1000 \\
+Resampling unit & Subject \\
+\bottomrule
+\end{tabular}
+\begin{flushleft}
+\footnotesize{$^\dagger$Savitzky--Golay provides noise-robust derivative estimation; results were qualitatively unchanged with finite differences ($\Delta t \in \{1,2,3\}$ samples) or alternative SG windows (see Appendix~\ref{app:velocity_robustness}).}
+\end{flushleft}
+\end{table}
 
 \section{Reproducibility: Commands}
 % Provide command lines that generate figures (paper1/).
@@ -950,43 +948,54 @@ We repeated the same amplitude correlations using a simple PCA-only embedding of
 
 Figures~\ref{fig:amplitude_control_partial}--\ref{fig:amplitude_control_pca} provide visual summaries of these controls.
 
-\subsection{Intrinsic metrics: coordinate invariance}
+\subsection{Intrinsic metrics: projection invariance and scale robustness}
 \label{app:intrinsic_metrics}
 
-A potential concern is that dynamical metrics computed in a 2D projection $\mathbf{y}(t)$ may depend on the choice of embedding, making results non-invariant under coordinate transformations. To address this, we computed primary scalar metrics directly in the full latent space $\mathbf{h}(t) \in \mathbb{R}^{64}$.
+A potential concern is that dynamical metrics computed in a 2D projection $\mathbf{y}(t)$ may depend on the choice of embedding---a ``scatterplot physics'' artifact. To address this, we computed primary scalar metrics directly in the full latent space $\mathbf{h}(t) \in \mathbb{R}^{64}$, making them projection-invariant.
 
 \paragraph{Whitened (Mahalanobis) distances.}
 Even in the full latent space, Euclidean distances depend on the (arbitrary) scaling of latent dimensions. To obtain invariance under invertible linear transformations, we use \emph{whitened} distances:
 \begin{equation}
 d_{\mathrm{whitened}}(\Delta\mathbf{h}) = \sqrt{(\Delta\mathbf{h})^\top \Sigma^{-1} (\Delta\mathbf{h})},
 \end{equation}
-where $\Sigma$ is the pooled covariance of $\mathbf{h}(t)$ across all subjects. This Mahalanobis metric is invariant to any invertible linear rescaling of latent axes, removing the most common ``arbitrary units'' critique.
+where $\Sigma$ is the pooled covariance of $\mathbf{h}(t)$ across all subjects. This Mahalanobis metric is invariant to any invertible linear rescaling of latent axes, addressing the most common linear-scaling (``arbitrary units'') critique.
 
 \paragraph{Comparison: intrinsic vs projected.}
-Table~\ref{tab:intrinsic_vs_projected} compares effect sizes for mean speed computed in (i) the full latent h(t) with Euclidean, whitened, and z-scored metrics, and (ii) the 2D PCA projection. All variants show consistent sign (novices faster than experts) and comparable magnitude, confirming that the main effect is not an artifact of a specific projection choice.
+Table~\ref{tab:intrinsic_vs_projected} compares effect sizes for mean speed computed in (i) the full latent $\mathbf{h}(t)$ with Euclidean, whitened, and z-scored metrics, and (ii) the 2D PCA projection. All variants show consistent sign (novices faster than experts). Critically, the intrinsic effects are \emph{larger} than the projected effect, indicating that projection attenuates rather than creates the observed difference. The consistency across Euclidean, z-scored, and whitened metrics demonstrates that the effect is not driven by arbitrary axis scaling or latent anisotropy.
 
 \begin{table}[h]
 \centering
-\caption{\textbf{Intrinsic vs projected speed effect sizes.} Cohen's $d$ for mean speed (expert $-$ novice; negative = experts slower). All variants show consistent direction.}
+\caption{\textbf{Intrinsic vs projected speed effect sizes.} Cohen's $d$ for mean speed (expert $-$ novice; negative = experts slower). All variants show consistent direction; intrinsic effects are larger than projected, indicating projection attenuates rather than creates the difference.}
 \label{tab:intrinsic_vs_projected}
-\begin{tabular}{llc}
+\begin{tabular}{llcc}
 \toprule
-Space & Metric & Cohen's $d$ \\
+Space & Metric & Cohen's $d$ & 95\% CI \\
 \midrule
-Intrinsic $\mathbf{h}(t)$ & Euclidean speed & $-0.76$ \\
-Intrinsic $\mathbf{h}(t)$ & Whitened speed & $-0.72$ \\
-Intrinsic $\mathbf{h}(t)$ & Z-scored speed & $-0.74$ \\
-Projected $\mathbf{y}(t)$ & PCA 2D speed & $-0.78$ \\
+Intrinsic $\mathbf{h}(t)$ & Euclidean speed & $-0.92$ & $[-1.76, -0.28]$ \\
+Intrinsic $\mathbf{h}(t)$ & Whitened speed & $-0.88$ & $[-1.89, -0.20]$ \\
+Intrinsic $\mathbf{h}(t)$ & Z-scored speed & $-0.97$ & $[-1.81, -0.31]$ \\
+Projected $\mathbf{y}(t)$ & PCA 2D speed & $-0.75$ & $[-1.57, -0.19]$ \\
 \bottomrule
 \end{tabular}
 \end{table}
 
 \paragraph{Flow fields remain illustrative.}
-Flow-field maps, divergence, and occupancy entropy are computed in the 2D projection for visualization and are explicitly treated as illustrative rather than quantitative claims. The primary quantitative claims (speed differences, effect sizes) are supported by coordinate-invariant metrics in the full latent space.
+Flow-field maps, divergence, and occupancy entropy are computed in the 2D projection for visualization and are explicitly treated as illustrative rather than quantitative claims. The primary quantitative claims (speed differences, effect sizes) are supported by projection-invariant and scale-robust metrics in the full latent space.
 
 \section{Figures}
+
 % =========================
-% Figure S1
+% Simulation 1: Metastable switching (moved from main text)
+% =========================
+\begin{figure*}[t]
+    \centering
+    \includegraphics[width=1.0\textwidth]{figures/paper1/simulation1_metastable.pdf}
+    \caption{Simulation validation of dynamical regime recovery. (A) Ground-truth regime sequence used for evaluation only. (B) Low-dimensional embedding of latent trajectories colored by regime; trajectories can overlap substantially, indicating that regimes are not necessarily separable by position alone. (C) Density and local flow-field estimates reveal regime-specific directional structure and dwell patterns despite geometric overlap. (D) Example dynamical metrics (e.g., speed, tortuosity, exploration) distinguish regimes by their dynamical organization rather than discrete state occupancy.}
+    \label{fig:simulations}
+\end{figure*}
+
+% =========================
+% Simulation 2: Attractor comparison variant 1
 % =========================
 \begin{figure*}[t]
     \centering
