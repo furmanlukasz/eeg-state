@@ -62,7 +62,7 @@ Resting-state EEG \sep dynamical systems \sep autoencoder \sep circular represen
 
 \subsection{Motivation: resting-state EEG as a dynamical system}
 
-Resting-state brain activity is highly dynamic and metastable, even in the absence of explicit tasks or stimuli. Unlike evoked responses that are time-locked to events, ongoing EEG at rest exhibits continual fluctuations and short-lived patterns of coordination among brain regions. Neural ensembles spontaneously couple and decouple in time, reflecting a balance between integration and segregation of activity \citet{TognoliKelso2014}. Metastability implies that the brain does not reside in a single stationary state but transitions among a repertoire of semi-stable configurations across multiple time scales \citet{Rabinovich2008,TognoliKelso2014}. M/EEG studies suggest that large-scale network configurations can be stable only for tens to hundreds of milliseconds \citet{Baker2014,Vidaurre2018}. In scalp EEG, this is captured by microstates---brief periods (roughly 50--100~ms) during which the scalp potential topography remains quasi-stable before switching to a new configuration \citet{Michel2018}. Together, these observations reinforce that ``resting'' activity is inherently non-stationary and structured in time.
+Resting-state brain activity is highly dynamic and metastable, even in the absence of explicit tasks or stimuli. Unlike evoked responses that are time-locked to events, ongoing EEG at rest exhibits continual fluctuations and short-lived patterns of coordination among brain regions. Neural ensembles spontaneously couple and decouple in time, reflecting a balance between integration and segregation of activity \citep{TognoliKelso2014}. Metastability implies that the brain does not reside in a single stationary state but transitions among a repertoire of semi-stable configurations across multiple time scales \citep{Rabinovich2008,TognoliKelso2014}. M/EEG studies suggest that large-scale network configurations can be stable only for tens to hundreds of milliseconds \citep{Baker2014,Vidaurre2018}. In scalp EEG, this is captured by microstates---brief periods (roughly 50--100~ms) during which the scalp potential topography remains quasi-stable before switching to a new configuration \citep{Michel2018}. Together, these observations reinforce that ``resting'' activity is inherently non-stationary and structured in time.
 
 Characterizing such dynamics is challenging because resting-state data lack external markers that naturally segment the signal. Segment choice is often arbitrary, and stationarity assumptions are frequently violated. Traditional stationary summaries (e.g., a single spectrum or connectivity matrix over a long epoch) can obscure transient structure. These issues motivate approaches that treat resting-state EEG as a continuous trajectory evolving in a high-dimensional state space, where the objects of interest are not isolated states but the geometry and flow of trajectories over time.
 
@@ -70,9 +70,9 @@ Importantly, for resting-state EEG this ``trajectory'' should not be understood 
 
 \subsection{From ``state labels'' to trajectory laws}
 
-Many frameworks for analyzing brain dynamics reduce continuous activity to a sequence of discrete ``states.'' In EEG microstate analysis, each time point is assigned to one of a few prototypical scalp maps, and comparisons across conditions focus on metrics such as fractional occupancy and mean duration \citet{Michel2018}. Similarly, hidden Markov model approaches represent activity as probabilistic switching among latent states with characteristic patterns and dwell times \citet{Baker2014,Vidaurre2018}. Such state-based methods are useful for summarizing recurring configurations, but a primary focus on state occupancy can miss differences that are expressed in the \emph{motion} through state space.
+Many frameworks for analyzing brain dynamics reduce continuous activity to a sequence of discrete ``states.'' In EEG microstate analysis, each time point is assigned to one of a few prototypical scalp maps, and comparisons across conditions focus on metrics such as fractional occupancy and mean duration \citep{Michel2018}. Similarly, hidden Markov model approaches represent activity as probabilistic switching among latent states with characteristic patterns and dwell times \citep{Baker2014,Vidaurre2018}. Such state-based methods are useful for summarizing recurring configurations, but a primary focus on state occupancy can miss differences that are expressed in the \emph{motion} through state space.
 
-A complementary hypothesis is that conditions or groups may share a common manifold (i.e., occupy broadly similar regions of state space) yet differ systematically in their trajectory laws: local flow structure, velocities, path geometry, recurrence, and exploration versus confinement. Empirical and theoretical work links altered brain conditions to changes in metastability and temporal exploration rather than wholesale changes in the set of accessible configurations \citet{Cavanna2018,Deco2017}. This motivates shifting emphasis from ``which states are visited'' to ``how trajectories evolve,'' and from static labels to dynamical descriptions of motion on learned coordinates.
+A complementary hypothesis is that conditions or groups may share a common manifold (i.e., occupy broadly similar regions of state space) yet differ systematically in their trajectory laws: local flow structure, velocities, path geometry, recurrence, and exploration versus confinement. Empirical and theoretical work links altered brain conditions to changes in metastability and temporal exploration rather than wholesale changes in the set of accessible configurations \citep{Cavanna2018,Deco2017}. This motivates shifting emphasis from ``which states are visited'' to ``how trajectories evolve,'' and from static labels to dynamical descriptions of motion on learned coordinates.
 
 \subsection{Contributions}
 
@@ -98,31 +98,31 @@ We adopt a trajectory-centric dynamical-systems view and introduce a framework d
 
 \subsection{Dynamical systems views of brain activity}
 
-Dynamical systems theory provides a principled framework for understanding brain activity as trajectories evolving on structured state spaces \citet{Kelso1995,Breakspear2017}. A central concept is metastability: partial and transient coordination among subsystems that preserves both integration and flexibility \citet{TognoliKelso2014}. This viewpoint emphasizes transient dwell near quasi-stable configurations and ongoing transitions rather than convergence to a single stable attractor.
+Dynamical systems theory provides a principled framework for understanding brain activity as trajectories evolving on structured state spaces \citep{Kelso1995,Breakspear2017}. A central concept is metastability: partial and transient coordination among subsystems that preserves both integration and flexibility \citep{TognoliKelso2014}. This viewpoint emphasizes transient dwell near quasi-stable configurations and ongoing transitions rather than convergence to a single stable attractor.
 
-Computational models of large-scale dynamics suggest that rich switching among network configurations can emerge near critical regimes of coupling, yielding maximal metastability and broad dynamical repertoires \citet{Deco2017}. Breakspear reviewed how attractors, oscillatory instabilities, and multiscale network interactions can explain complex non-stationary neural time series \citet{Breakspear2017}. In parallel, Rabinovich and colleagues argued that cognition can be described by transient dynamics on high-dimensional competitive landscapes, where trajectories proceed through sequences of metastable configurations \citet{Rabinovich2008}. These perspectives motivate trajectory-centric descriptions that quantify how activity moves through state space.
+Computational models of large-scale dynamics suggest that rich switching among network configurations can emerge near critical regimes of coupling, yielding maximal metastability and broad dynamical repertoires \citep{Deco2017}. Breakspear reviewed how attractors, oscillatory instabilities, and multiscale network interactions can explain complex non-stationary neural time series \citep{Breakspear2017}. In parallel, Rabinovich and colleagues argued that cognition can be described by transient dynamics on high-dimensional competitive landscapes, where trajectories proceed through sequences of metastable configurations \citep{Rabinovich2008}. These perspectives motivate trajectory-centric descriptions that quantify how activity moves through state space.
 
-A complementary modeling tradition uses biophysically motivated neural mass and mean-field models (e.g., Wilson--Cowan and Jansen--Rit) and whole-brain simulation platforms (e.g., The Virtual Brain) to generate synthetic dynamics with interpretable control parameters \citet{WilsonCowan1972,JansenRit1995,SanzLeon2013}.
+A complementary modeling tradition uses biophysically motivated neural mass and mean-field models (e.g., Wilson--Cowan and Jansen--Rit) and whole-brain simulation platforms (e.g., The Virtual Brain) to generate synthetic dynamics with interpretable control parameters \citep{WilsonCowan1972,JansenRit1995,SanzLeon2013}.
 
 \subsection{Representation learning for EEG}
 
-Deep learning has enabled representation learning for EEG, including convolutional architectures that learn spectral-spatial features from raw signals \citet{Schirrmeister2017} and broader applications across EEG decoding tasks \citet{Roy2019}. More recently, self-supervised and unsupervised approaches (e.g., contrastive objectives and reconstruction-based models) have sought transferable representations from unlabeled EEG \citet{Banville2021,Kostas2021}. These methods can capture recurring EEG motifs and yield compact latent spaces.
+Deep learning has enabled representation learning for EEG, including convolutional architectures that learn spectral-spatial features from raw signals \citep{Schirrmeister2017} and broader applications across EEG decoding tasks \citep{Roy2019}. More recently, self-supervised and unsupervised approaches (e.g., contrastive objectives and reconstruction-based models) have sought transferable representations from unlabeled EEG \citep{Banville2021,Kostas2021}. These methods can capture recurring EEG motifs and yield compact latent spaces.
 
 However, most EEG representation learning is evaluated by predictive utility, and latent spaces are often treated as features rather than dynamical state spaces. Latent dimensions may not correspond to interpretable neurophysiological variables, and temporal structure is frequently aggregated into chunk-level embeddings. In contrast, we use representation learning as a coordinate transformation that preserves moment-to-moment variation, producing a continuous latent trajectory that can be interrogated using dynamical and geometric measures rather than optimized for classification accuracy.
 
-Conceptually, this use of an autoencoder aligns with classic nonlinear dimensionality-reduction views of autoencoders \citet{Hinton2006} and with the broader perspective that many neural recordings admit low-dimensional ``neural manifolds'' on which dynamics unfold \citet{CunninghamYu2014}.
+Conceptually, this use of an autoencoder aligns with classic nonlinear dimensionality-reduction views of autoencoders \citep{Hinton2006} and with the broader perspective that many neural recordings admit low-dimensional ``neural manifolds'' on which dynamics unfold \citep{CunninghamYu2014}.
 
-Related latent-variable approaches explicitly couple representation learning with dynamical priors, including variational autoencoders \citet{KingmaWelling2014} and sequential latent dynamical models developed for population activity (e.g., LFADS) \citet{Pandarinath2018}. More broadly, nonlinear state-space models with amortized inference networks \citet{Krishnan2017Structured} and switching/segmented dynamical models (e.g., recurrent switching linear dynamical systems) \citet{Linderman2017rSLDS} provide complementary ways to formalize latent trajectories and their regime structure.
+Related latent-variable approaches explicitly couple representation learning with dynamical priors, including variational autoencoders \citep{KingmaWelling2014} and sequential latent dynamical models developed for population activity (e.g., LFADS) \citep{Pandarinath2018}. More broadly, nonlinear state-space models with amortized inference networks \citep{Krishnan2017Structured} and switching/segmented dynamical models (e.g., recurrent switching linear dynamical systems) \citep{Linderman2017rSLDS} provide complementary ways to formalize latent trajectories and their regime structure.
 
 \subsection{Trajectory-based and recurrence-based analyses}
 
-Nonlinear time-series analysis offers trajectory-centric tools such as recurrence plots and recurrence quantification analysis (RQA), which summarize revisitation structure, determinism, and stability in reconstructed state spaces \citet{Marwan2007}. While recurrence methods can quantify dynamical changes in physiological signals, they can be sensitive to embedding and threshold choices, and applying them to multichannel, non-stationary EEG can be challenging.
+Nonlinear time-series analysis offers trajectory-centric tools such as recurrence plots and recurrence quantification analysis (RQA), which summarize revisitation structure, determinism, and stability in reconstructed state spaces \citep{Marwan2007}. While recurrence methods can quantify dynamical changes in physiological signals, they can be sensitive to embedding and threshold choices, and applying them to multichannel, non-stationary EEG can be challenging.
 
-State-space geometry approaches include microstates, which discretize trajectories by clustering EEG topographies \citet{Michel2018}, and HMM-based analyses, which infer probabilistic switching among transient network states and estimate dwell/transition structure \citet{Baker2014,Vidaurre2018}. These methods provide compact summaries but impose categorical boundaries that can obscure within-region flow structure.
+State-space geometry approaches include microstates, which discretize trajectories by clustering EEG topographies \citep{Michel2018}, and HMM-based analyses, which infer probabilistic switching among transient network states and estimate dwell/transition structure \citep{Baker2014,Vidaurre2018}. These methods provide compact summaries but impose categorical boundaries that can obscure within-region flow structure.
 
-Related approaches aim to recover dynamical laws directly from data, including sparse identification of nonlinear dynamical systems (SINDy) \citet{Brunton2016}, dynamic mode decomposition \citet{Schmid2010DMD}, and continuous-time latent dynamical models such as neural ordinary differential equations \citet{Chen2018}. Manifold-learning constructions such as diffusion maps \citet{CoifmanLafon2006} provide an additional perspective on learning low-dimensional coordinates adapted to nonlinear geometry.
+Related approaches aim to recover dynamical laws directly from data, including sparse identification of nonlinear dynamical systems (SINDy) \citep{Brunton2016}, dynamic mode decomposition \citep{Schmid2010DMD}, and continuous-time latent dynamical models such as neural ordinary differential equations \citep{Chen2018}. Manifold-learning constructions such as diffusion maps \citep{CoifmanLafon2006} provide an additional perspective on learning low-dimensional coordinates adapted to nonlinear geometry.
 
-Our framework is complementary: it retains a continuous latent trajectory and estimates flow fields and trajectory geometry directly in the learned space. This enables quantification of differences in motion (e.g., speed, tortuosity, exploration) even when conditions share a manifold and state occupancy is similar, a common feature of metastable dynamics \citet{TognoliKelso2014,Deco2017}.
+Our framework is complementary: it retains a continuous latent trajectory and estimates flow fields and trajectory geometry directly in the learned space. This enables quantification of differences in motion (e.g., speed, tortuosity, exploration) even when conditions share a manifold and state occupancy is similar, a common feature of metastable dynamics \citep{TognoliKelso2014,Deco2017}.
 
 % =========================
 \section{Methods}
@@ -130,7 +130,7 @@ Our framework is complementary: it retains a continuous latent trajectory and es
 
 \subsection{Data}
 \subsubsection{Open empirical dataset: Meditation BIDS}
-We used the openly available meditation EEG dataset ds001787 (OpenNeuro; BIDS formatted), originally collected to study reduced mind wandering in experienced meditators and associated EEG correlates \citet{BrandmeyerDelorme2016,Delorme2018BIDS}. The experiment includes repeated experience-sampling probes during meditation to label subjective mind-wandering versus on-task periods, enabling comparisons between experts and novices on identical recording protocols.
+We used the openly available meditation EEG dataset ds001787 (OpenNeuro; BIDS formatted), originally collected to study reduced mind wandering in experienced meditators and associated EEG correlates \citep{BrandmeyerDelorme2016,Delorme2018BIDS}. The experiment includes repeated experience-sampling probes during meditation to label subjective mind-wandering versus on-task periods, enabling comparisons between experts and novices on identical recording protocols.
 
 \subsubsection{Synthetic dynamical systems (ground-truth validation)}
 To validate whether the proposed dynamical microscope recovers known dynamical structure, we constructed synthetic multivariate dynamical systems with explicitly defined latent dynamics and regime structure. The simulations provide full access to ground-truth regime identity and dynamical parameters, while keeping the observation model generic enough to avoid tuning the analysis pipeline to a particular system class.
@@ -152,9 +152,9 @@ Table~\ref{tab:implementation_summary} (Appendix) summarizes the key implementat
 
 \subsection{Preprocessing and circular phase--amplitude representation}
 
-Let $\mathbf{x}(t) \in \mathbb{R}^{C}$ denote the multichannel EEG signal. After bandpass filtering (2--48~Hz, zero-phase FIR filter), the analytic signal for each channel is obtained via the Hilbert transform applied to the continuous (unchunked) signal, yielding instantaneous phase $\phi_c(t)$ and amplitude $a_c(t)$ \citet{Boashash1992}.
+Let $\mathbf{x}(t) \in \mathbb{R}^{C}$ denote the multichannel EEG signal. After bandpass filtering (2--48~Hz, zero-phase FIR filter), the analytic signal for each channel is obtained via the Hilbert transform applied to the continuous (unchunked) signal, yielding instantaneous phase $\phi_c(t)$ and amplitude $a_c(t)$ \citep{Boashash1992}.
 
-Instantaneous phase and amplitude are widely used to quantify oscillatory coordination and cross-frequency interactions (e.g., phase--amplitude coupling), and provide a natural starting point for trajectory-centric representations of ongoing EEG \citet{Canolty2006,Tort2010}.
+Instantaneous phase and amplitude are widely used to quantify oscillatory coordination and cross-frequency interactions (e.g., phase--amplitude coupling), and provide a natural starting point for trajectory-centric representations of ongoing EEG \citep{Canolty2006,Tort2010}.
 
 Each channel is represented with three features:
 \begin{equation}
@@ -187,7 +187,7 @@ To avoid ambiguity, we define the following terms used throughout:
 \end{itemize}
 Primary scalar metrics (mean speed, tortuosity, explored variance) are computed in the \emph{full latent space} $\mathbf{h}(t)$ to ensure coordinate invariance, while flow-field visualizations use the 2D projection $\mathbf{y}(t)$ for interpretability (see below).
 
-For visualization and pooled geometric analysis, latent trajectories $\mathbf{h}(t)$ are optionally projected into low-dimensional embeddings $\mathbf{y}(t) \in \mathbb{R}^d$ using PCA, temporal PCA (TPCA), or delay embeddings \citet{Takens1981,Sauer1991}.
+For visualization and pooled geometric analysis, latent trajectories $\mathbf{h}(t)$ are optionally projected into low-dimensional embeddings $\mathbf{y}(t) \in \mathbb{R}^d$ using PCA, temporal PCA (TPCA), or delay embeddings \citep{Takens1981,Sauer1991}.
 
 \paragraph{Velocity estimation as a scale-dependent quantity.}
 Velocity in a sampled trajectory is inherently a scale-dependent quantity: at very fine temporal resolutions ($\Delta t = 1$ sample), finite-difference estimates are dominated by high-frequency fluctuations and numerical noise, while coarser temporal scales capture mesoscale dynamical flow. To obtain robust velocity estimates that reflect trajectory dynamics rather than frame-to-frame jitter, we use Savitzky--Golay (SG) derivative estimation \citep{SavitzkyGolay1964} with a window of 5 samples and polynomial order 2:
@@ -392,9 +392,9 @@ Most resting-state EEG pipelines either (i) average over time to obtain stationa
 A conceptual advantage of the dynamical microscope is the joint use of Lagrangian and Eulerian summaries. Time-ordered trajectories capture transient realizations, while density and flow-field estimates characterize ensemble structure by pooling across time and/or subjects. This dual view is particularly appropriate for resting-state EEG, where stochasticity and nonstationarity make any single realization incomplete, and where group differences may be expressed as shifts in the probability flow on a manifold rather than as separable clusters.
 
 \subsection{Interpretation of meditation expertise: reduced speed and centralized flow organization}
-As summarized in Results, experts exhibited reduced mean latent speed and more centralized occupancy relative to novices. These patterns---convergent across density, radial, and flow-field analyses---are consistent with prior work linking meditation expertise to reduced mind wandering \citet{BrandmeyerDelorme2016} and with broader accounts of meditation as modulating attentional stability \citet{Hasenkamp2012,Christoff2009,SmallwoodSchooler2006}.
+As summarized in Results, experts exhibited reduced mean latent speed and more centralized occupancy relative to novices. These patterns---convergent across density, radial, and flow-field analyses---are consistent with prior work linking meditation expertise to reduced mind wandering \citep{BrandmeyerDelorme2016} and with broader accounts of meditation as modulating attentional stability \citep{Hasenkamp2012,Christoff2009,SmallwoodSchooler2006}.
 
-Relative to Brandmeyer and Delorme's original analysis of this dataset \citet{BrandmeyerDelorme2016}, our results suggest a complementary interpretation: expertise need not manifest as cleanly separable ``states'' in latent space, but can appear primarily as changes in the \emph{kinematics} of ongoing activity (slower transitions and reduced high-speed peripheral excursions) on a shared manifold. Spectral correlates of attentional control reported previously can thus be viewed as signal-level markers of a higher-level dynamical reorganization.
+Relative to Brandmeyer and Delorme's original analysis of this dataset \citep{BrandmeyerDelorme2016}, our results suggest a complementary interpretation: expertise need not manifest as cleanly separable ``states'' in latent space, but can appear primarily as changes in the \emph{kinematics} of ongoing activity (slower transitions and reduced high-speed peripheral excursions) on a shared manifold. Spectral correlates of attentional control reported previously can thus be viewed as signal-level markers of a higher-level dynamical reorganization.
 
 \paragraph{Robustness to training variants.}
 A plausible concern is that representation learning could manufacture apparent group differences through training choices. We therefore emphasize a conservative reading: the key claim is not that experts/novices occupy different \emph{locations}, but that they exhibit different \emph{motion organization} (speed modulation and spatially structured flow) on a largely shared manifold. Robustness checks, including ablation of optional contrastive regularization, are reported in \secref{app:contrastive_ablation}.
@@ -463,7 +463,7 @@ Key priorities for extending this work include: (i) \emph{multi-scale analysis} 
 \section{Conclusion}
 \label{sec:conclusion}
 % =========================
-We presented a dynamical microscope framework for resting-state EEG that emphasizes continuous trajectories, probability flow, and geometric organization in learned latent spaces. By combining circular phase--amplitude encoding with autoencoder-based representation learning and flow/geometry metrics, the approach characterizes dynamical regimes in terms of \emph{how} neural activity moves through state space, rather than relying primarily on discrete state labels or stationary averages \citet{CahnPolich2006}. A key implication is that trajectory organization offers a unifying language to place mental training and cognitive decline on a shared dynamical spectrum, motivating falsifiable hypotheses for clinical progressions (e.g., MCI). 
+We presented a dynamical microscope framework for resting-state EEG that emphasizes continuous trajectories, probability flow, and geometric organization in learned latent spaces. By combining circular phase--amplitude encoding with autoencoder-based representation learning and flow/geometry metrics, the approach characterizes dynamical regimes in terms of \emph{how} neural activity moves through state space, rather than relying primarily on discrete state labels or stationary averages \citep{CahnPolich2006}. A key implication is that trajectory organization offers a unifying language to place mental training and cognitive decline on a shared dynamical spectrum, motivating falsifiable hypotheses for clinical progressions (e.g., MCI). 
 
 Validation on synthetic dynamical systems demonstrated that the framework can recover regime differences expressed as changes in dynamical laws on overlapping manifolds. In an open meditation dataset, experts and novices occupied a largely shared manifold, yet differed in dynamical organization: experts exhibited reduced mean latent speed and a more centralized, stabilized flow organization, while novices showed relatively stronger peripheral traversal and distinct flow-field structure. These findings support a trajectory-centric interpretation of meditation expertise as modulation of metastable dynamics rather than the emergence of distinct new states.
 
@@ -603,221 +603,221 @@ J.~A.~S. Kelso.
 \newblock \emph{Dynamic Patterns: The Self-Organization of Brain and Behavior}.
 \newblock MIT Press, Cambridge, MA, 1995.
 
-\bibitem{Rabinovich2008}
+\bibitem[Rabinovich et~al.(2008)]{Rabinovich2008}
 M.~I. Rabinovich, R.~Huerta, P.~Varona, and V.~S. Afraimovich.
 \newblock Transient cognitive dynamics, metastability, and decision making.
 \newblock \emph{PLoS Computational Biology}, 4(5):e1000072, 2008.
 \newblock doi:10.1371/journal.pcbi.1000072.
 
-\bibitem{TognoliKelso2014}
+\bibitem[Tognoli and Kelso(2014)]{TognoliKelso2014}
 E.~Tognoli and J.~A.~S. Kelso.
 \newblock The metastable brain.
 \newblock \emph{Neuron}, 81(1):35--48, 2014.
 \newblock doi:10.1016/j.neuron.2013.12.022.
 
-\bibitem{Breakspear2017}
+\bibitem[Breakspear(2017)]{Breakspear2017}
 M.~Breakspear.
 \newblock Dynamic models of large-scale brain activity.
 \newblock \emph{Nature Neuroscience}, 20(3):340--352, 2017.
 \newblock doi:10.1038/nn.4497.
 
-\bibitem{Deco2017}
+\bibitem[Deco et~al.(2017)]{Deco2017}
 G.~Deco, M.~L. Kringelbach, V.~K. Jirsa, and P.~Ritter.
 \newblock The dynamics of resting fluctuations in the brain: metastability and its dynamical cortical core.
 \newblock \emph{Scientific Reports}, 7:3095, 2017.
 \newblock doi:10.1038/s41598-017-03073-5.
 
-\bibitem{Michel2018}
+\bibitem[Michel and Koenig(2018)]{Michel2018}
 C.~M. Michel and T.~Koenig.
 \newblock EEG microstates as a tool for studying the temporal dynamics of whole-brain neuronal networks: a review.
 \newblock \emph{NeuroImage}, 180:577--593, 2018.
 \newblock doi:10.1016/j.neuroimage.2017.11.062.
 
-\bibitem{Baker2014}
+\bibitem[Baker et~al.(2014)]{Baker2014}
 A.~P. Baker, M.~J. Brookes, I.~Rezek, S.~M. Smith, T.~Behrens, J.~Probert, and M.~W. Woolrich.
 \newblock Fast transient networks in spontaneous human brain activity.
 \newblock \emph{eLife}, 3:e01867, 2014.
 \newblock doi:10.7554/eLife.01867.
 
-\bibitem{Vidaurre2018}
+\bibitem[Vidaurre et~al.(2018)]{Vidaurre2018}
 D.~Vidaurre, L.~T. Hunt, A.~J. Quinn, B.~A.~E. Hunt, M.~J. Brookes, A.~C. Nobre, and M.~W. Woolrich.
 \newblock Discovering dynamic brain networks from big data in rest and task.
 \newblock \emph{NeuroImage}, 180:646--656, 2018.
 \newblock doi:10.1016/j.neuroimage.2017.06.077.
 
-\bibitem{Schirrmeister2017}
+\bibitem[Schirrmeister et~al.(2017)]{Schirrmeister2017}
 R.~T. Schirrmeister, J.~T. Springenberg, L.~D. Fiederer, M.~Glasstetter, K.~Eggensperger, M.~Tangermann, and T.~Ball.
 \newblock Deep learning with convolutional neural networks for EEG decoding and visualization.
 \newblock \emph{Human Brain Mapping}, 38(11):5391--5420, 2017.
 \newblock doi:10.1002/hbm.23730.
 
-\bibitem{Roy2019}
+\bibitem[Roy et~al.(2019)]{Roy2019}
 Y.~Roy, H.~Banville, I.~Albuquerque, A.~Gramfort, T.~H. Falk, and J.~Faubert.
 \newblock Deep learning-based electroencephalography analysis: a systematic review.
 \newblock \emph{Journal of Neural Engineering}, 16(5):051001, 2019.
 \newblock doi:10.1088/1741-2552/ab260c.
 
-\bibitem{Banville2021}
+\bibitem[Banville et~al.(2021)]{Banville2021}
 H.~Banville, O.~Chehab, A.~Hyv{\"a}rinen, D.~A. Engemann, and A.~Gramfort.
 \newblock Uncovering the structure of clinical EEG signals with self-supervised learning.
 \newblock \emph{Journal of Neural Engineering}, 18(4):046020, 2021.
 \newblock doi:10.1088/1741-2552/ac1abb.
 
-\bibitem{Kostas2021}
+\bibitem[Kostas et~al.(2021)]{Kostas2021}
 D.~Kostas, S.~Aroca-Ouellette, and F.~Rudzicz.
 \newblock BENDR: Using transformers and a contrastive self-supervised learning task to learn from massive amounts of EEG data.
 \newblock \emph{Frontiers in Human Neuroscience}, 15:653659, 2021.
 \newblock doi:10.3389/fnhum.2021.653659.
 
-\bibitem{Marwan2007}
+\bibitem[Marwan et~al.(2007)]{Marwan2007}
 N.~Marwan, M.~C. Romano, M.~Thiel, and J.~Kurths.
 \newblock Recurrence plots for the analysis of complex systems.
 \newblock \emph{Physics Reports}, 438(5--6):237--329, 2007.
 \newblock doi:10.1016/j.physrep.2006.11.001.
 
-\bibitem{Cavanna2018}
+\bibitem[Cavanna et~al.(2018)]{Cavanna2018}
 F.~Cavanna, M.~G. Vilas, M.~Palmucci, and E.~Tagliazucchi.
 \newblock Dynamic functional connectivity and brain metastability during altered states of consciousness.
 \newblock \emph{NeuroImage}, 180:383--395, 2018.
 \newblock doi:10.1016/j.neuroimage.2017.09.065.
 
-\bibitem{Boashash1992}
+\bibitem[Boashash(1992)]{Boashash1992}
 B.~Boashash.
 \newblock Estimating and interpreting the instantaneous frequency of a signal.
 \newblock \emph{Proceedings of the IEEE}, 80(4):520--538, 1992.
 
-\bibitem{Canolty2006}
+\bibitem[Canolty et~al.(2006)]{Canolty2006}
 R.~T. Canolty, E.~Edwards, S.~S. Dalal, M.~Soltani, D.~Nagarajan, H.~E. Kirsch, M.~S. Berger, N.~M. Barbaro, and R.~T. Knight.
 \newblock High gamma power is phase-locked to theta oscillations in human neocortex.
 \newblock \emph{Science}, 313(5793):1626--1628, 2006.
 
-\bibitem{Tort2010}
+\bibitem[Tort et~al.(2010)]{Tort2010}
 A.~B.~L. Tort, R.~Komorowski, H.~Eichenbaum, and N.~Kopell.
 \newblock Measuring phase-amplitude coupling between neuronal oscillations of different frequencies.
 \newblock \emph{Journal of Neurophysiology}, 104(2):1195--1210, 2010.
 
-\bibitem{Hinton2006}
+\bibitem[Hinton and Salakhutdinov(2006)]{Hinton2006}
 G.~E. Hinton and R.~R. Salakhutdinov.
 \newblock Reducing the dimensionality of data with neural networks.
 \newblock \emph{Science}, 313(5786):504--507, 2006.
 
-\bibitem{CunninghamYu2014}
+\bibitem[Cunningham and Yu(2014)]{CunninghamYu2014}
 J.~P. Cunningham and B.~M. Yu.
 \newblock Dimensionality reduction for large-scale neural recordings.
 \newblock \emph{Nature Neuroscience}, 17(11):1500--1509, 2014.
 
-\bibitem{Brunton2016}
+\bibitem[Brunton et~al.(2016)]{Brunton2016}
 S.~L. Brunton, J.~L. Proctor, and J.~N. Kutz.
 \newblock Discovering governing equations from data by sparse identification of nonlinear dynamical systems.
 \newblock \emph{Proceedings of the National Academy of Sciences}, 113(15):3932--3937, 2016.
 
-\bibitem{Chen2018}
+\bibitem[Chen et~al.(2018)]{Chen2018}
 R.~T.~Q. Chen, Y.~Rubanova, J.~Bettencourt, and D.~Duvenaud.
 \newblock Neural ordinary differential equations.
 \newblock In \emph{Advances in Neural Information Processing Systems (NeurIPS)}, 2018.
 
-\bibitem{WilsonCowan1972}
+\bibitem[Wilson and Cowan(1972)]{WilsonCowan1972}
 H.~R. Wilson and J.~D. Cowan.
 \newblock Excitatory and inhibitory interactions in localized populations of model neurons.
 \newblock \emph{Biophysical Journal}, 12(1):1--24, 1972.
 
-\bibitem{JansenRit1995}
+\bibitem[Jansen and Rit(1995)]{JansenRit1995}
 B.~H. Jansen and V.~G. Rit.
 \newblock Electroencephalogram and visual evoked potential generation in a mathematical model of coupled cortical columns.
 \newblock \emph{Biological Cybernetics}, 73(4):357--366, 1995.
 
-\bibitem{SanzLeon2013}
+\bibitem[Sanz~Leon et~al.(2013)]{SanzLeon2013}
 P.~Sanz Leon, S.~A. Knock, M.~M. Woodman, L.~Domide, J.~Mersmann, A.~R. McIntosh, and V.~K. Jirsa.
 \newblock The Virtual Brain: a simulator of primate brain network dynamics.
 \newblock \emph{Frontiers in Neuroinformatics}, 7:10, 2013.
 
-\bibitem{KingmaWelling2014}
+\bibitem[Kingma and Welling(2014)]{KingmaWelling2014}
 D.~P. Kingma and M.~Welling.
 \newblock Auto-encoding variational Bayes.
 \newblock In \emph{International Conference on Learning Representations (ICLR)}, 2014.
 
-\bibitem{Pandarinath2018}
+\bibitem[Pandarinath et~al.(2018)]{Pandarinath2018}
 C.~Pandarinath, D.~J. O'Shea, J.~Collins, J.~J. J. J. Smith, P.~B. K. S. J. J. et al.
 \newblock Inferring single-trial neural population dynamics using sequential auto-encoders.
 \newblock \emph{Nature Methods}, 15(10):805--815, 2018.
 
-\bibitem{Takens1981}
+\bibitem[Takens(1981)]{Takens1981}
 F.~Takens.
 \newblock Detecting strange attractors in turbulence.
 \newblock In D.~A. Rand and L.-S. Young (eds.), \emph{Dynamical Systems and Turbulence, Warwick 1980}, Lecture Notes in Mathematics 898, Springer, 1981.
 
-\bibitem{Sauer1991}
+\bibitem[Sauer et~al.(1991)]{Sauer1991}
 T.~Sauer, J.~A. Yorke, and M.~Casdagli.
 \newblock Embedology.
 \newblock \emph{Journal of Statistical Physics}, 65(3--4):579--616, 1991.
 
-\bibitem{SavitzkyGolay1964}
+\bibitem[Savitzky and Golay(1964)]{SavitzkyGolay1964}
 A.~Savitzky and M.~J.~E. Golay.
 \newblock Smoothing and differentiation of data by simplified least squares procedures.
 \newblock \emph{Analytical Chemistry}, 36(8):1627--1639, 1964.
 \newblock doi:10.1021/ac60214a047.
 
-\bibitem{BrandmeyerDelorme2016}
+\bibitem[Brandmeyer and Delorme(2018)]{BrandmeyerDelorme2016}
 T.~Brandmeyer and A.~Delorme.
 \newblock Reduced mind wandering in experienced meditators and associated EEG correlates.
 \newblock \emph{Experimental Brain Research}, 236:2519--2528, 2018.
 \newblock doi:10.1007/s00221-016-4811-5.
 
-\bibitem{Delorme2018BIDS}
+\bibitem[Delorme(2018)]{Delorme2018BIDS}
 A.~Delorme.
 \newblock BIDS formatted EEG meditation experiment data.
 \newblock \emph{Zenodo}, 2018.
 \newblock doi:10.5281/zenodo.2536267.
 
-\bibitem{Hasenkamp2012}
+\bibitem[Hasenkamp et~al.(2012)]{Hasenkamp2012}
 W.~Hasenkamp, C.~D. Wilson-Mendenhall, E.~Duncan, and L.~W. Barsalou.
 \newblock Mind wandering and attention during focused meditation: a fine-grained temporal analysis of fluctuating cognitive states.
 \newblock \emph{NeuroImage}, 59(1):750--760, 2012.
 \newblock doi:10.1016/j.neuroimage.2011.07.008.
 
-\bibitem{Christoff2009}
+\bibitem[Christoff et~al.(2009)]{Christoff2009}
 K.~Christoff, A.~M. Gordon, J.~Smallwood, R.~Smith, and J.~W. Schooler.
 \newblock Experience sampling during fMRI reveals default network and executive system contributions to mind wandering.
 \newblock \emph{Proceedings of the National Academy of Sciences}, 106(21):8719--8724, 2009.
 \newblock doi:10.1073/pnas.0900234106.
 
-\bibitem{Brewer2011}
+\bibitem[Brewer et~al.(2011)]{Brewer2011}
 J.~A. Brewer, P.~D. Worhunsky, J.~R. Gray, Y.-Y. Tang, J.~Weber, and H.~Kober.
 \newblock Meditation experience is associated with differences in default mode network activity and connectivity.
 \newblock \emph{Proceedings of the National Academy of Sciences}, 108(50):20254--20259, 2011.
 \newblock doi:10.1073/pnas.1112029108.
 
-\bibitem{CahnPolich2006}
+\bibitem[Cahn and Polich(2006)]{CahnPolich2006}
 B.~R. Cahn and J.~Polich.
 \newblock Meditation states and traits: EEG, ERP, and neuroimaging studies.
 \newblock \emph{Psychological Bulletin}, 132(2):180--211, 2006.
 \newblock doi:10.1037/0033-2909.132.2.180.
 
-\bibitem{Schmid2010DMD}
+\bibitem[Schmid(2010)]{Schmid2010DMD}
 P.~J. Schmid.
 \newblock Dynamic mode decomposition of numerical and experimental data.
 \newblock \emph{Journal of Fluid Mechanics}, 656:5--28, 2010.
 \newblock doi:10.1017/S0022112010001217.
 
-\bibitem{CoifmanLafon2006}
+\bibitem[Coifman and Lafon(2006)]{CoifmanLafon2006}
 R.~R. Coifman and S.~Lafon.
 \newblock Diffusion maps.
 \newblock \emph{Applied and Computational Harmonic Analysis}, 21(1):5--30, 2006.
 \newblock doi:10.1016/j.acha.2006.04.006.
 
-\bibitem{SmallwoodSchooler2006}
+\bibitem[Smallwood and Schooler(2006)]{SmallwoodSchooler2006}
 J.~Smallwood and J.~W. Schooler.
 \newblock The restless mind.
 \newblock \emph{Psychological Bulletin}, 132(6):946--958, 2006.
 \newblock doi:10.1037/0033-2909.132.6.946.
 
-\bibitem{Krishnan2017Structured}
+\bibitem[Krishnan et~al.(2017)]{Krishnan2017Structured}
 R.~G. Krishnan, U.~Shalit, and D.~Sontag.
 \newblock Structured inference networks for nonlinear state space models.
 \newblock In \emph{Proceedings of the AAAI Conference on Artificial Intelligence}, 2017.
 \newblock arXiv:1609.09869.
 
-\bibitem{Linderman2017rSLDS}
+\bibitem[Linderman et~al.(2017)]{Linderman2017rSLDS}
 S.~W. Linderman, M.~J. Johnson, A.~C. Miller, R.~P. Adams, D.~M. Blei, L.~Paninski.
 \newblock Bayesian learning and inference in recurrent switching linear dynamical systems.
 \newblock In \emph{Proceedings of the 20th International Conference on Artificial Intelligence and Statistics (AISTATS)}, PMLR 54:914--922, 2017.
