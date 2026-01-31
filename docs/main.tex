@@ -47,7 +47,8 @@ Latent Trajectory Geometry and Flow Metrics from Circular Phase--Amplitude Repre
 \begin{abstract}
 Resting-state EEG lacks explicit events and is dominated by non-stationary dynamics, making segment choice and dynamical interpretation difficult.
 We introduce a ``dynamical microscope'' framework that converts multichannel EEG into circular phase--amplitude features, learns a data-driven latent trajectory representation with an autoencoder, and quantifies dynamical regimes through trajectory geometry and flow-field metrics.
-Using synthetic dynamical systems as ground-truth validation and an open meditation dataset as empirical validation, we show that differences emerge primarily in how trajectories move through latent space (flow geometry and exploration), rather than in discrete state occupancy.
+Using synthetic dynamical systems as ground-truth validation and an open meditation dataset as empirical illustration, we show that group differences can be expressed as changes in latent trajectory speed and flow organization on a shared manifold, even when state occupancy largely overlaps.
+Some flow metrics (e.g., explored variance) capture trajectory geometry orthogonal to discrete-state summaries, while others provide continuous analogues of switching statistics.
 \end{abstract}
 
 \begin{keyword}
@@ -265,17 +266,11 @@ All simulations were generated as multivariate oscillatory time series and proce
 \subsection{Does the microscope recover known regime changes?}
 \label{sec:sim_validation}
 
-Figure~\ref{fig:simulations} summarizes validation results on synthetic systems. The key point is that in metastable settings the regimes should not be expected to form clean, separable ``state clusters'' in the embedding. Instead, regimes correspond to \emph{different dynamical organizations of flow on an overlapping manifold}: trajectories may revisit the same regions of latent space, yet differ in local drift directions, speeds, dwell structure, and path geometry.
+Figure~\ref{fig:simulations} summarizes validation results on synthetic systems. Regimes correspond to \emph{different dynamical organizations of flow on an overlapping manifold}: trajectories may revisit the same regions of latent space, yet differ in local drift directions, speeds, and path geometry. The framework recovers these differences using trajectory- and flow-based quantities rather than position alone.
 
-% Figure moved to appendix (Figure~\ref{fig:simulations})
+In the stability contrast simulation, the stable regime produces slower, more confined motion, while the exploratory regime produces faster trajectories and broader coverage---differences reflected both geometrically and dynamically in the recovered latent trajectories.
 
-Accordingly, in the metastable switching simulation, regimes are defined by distinct dynamical laws acting on a shared latent geometry; trajectories overlap spatially but exhibit regime-specific flow patterns and velocity statistics. The proposed framework recovers these differences using trajectory- and flow-based quantities rather than position alone.
-
-In the stability contrast simulation, the stable regime produces slower, more confined motion, while the exploratory regime produces faster trajectories and broader coverage. These differences are reflected both geometrically (coverage) and dynamically (velocity statistics) in the recovered latent trajectories.
-
-Together, these simulations support that the framework is sensitive to changes in dynamical organization, including cases where regimes are not trivially separable by state occupancy.
-
-Importantly, the recovered latent geometries in these simulations (Figure~\ref{fig:simulation2},Figure~\ref{fig:simulation3},Figure~\ref{fig:simulation4}) resemble qualitative features commonly observed in empirical neural data. In particular, regimes associated with reduced exploration exhibit a contraction of state-space coverage toward a central region, accompanied by slower motion and prolonged dwell, while more exploratory regimes produce broader, more diffuse occupancy. Such patterns mirror empirical observations in resting-state EEG across conditions associated with altered cognitive flexibility or disease, where differences manifest not as distinct state clusters but as changes in the breadth, speed, and organization of latent trajectories. Although the simulations are not intended to model specific biological mechanisms, they demonstrate that the proposed framework is sensitive to dynamical signatures consistent with biologically plausible regime alterations.
+The recovered geometries (Figure~\ref{fig:simulation2},Figure~\ref{fig:simulation3},Figure~\ref{fig:simulation4}) resemble patterns observed in empirical neural data: reduced-exploration regimes contract toward central regions with slower motion, while exploratory regimes produce broader occupancy. Although simulations do not model specific biological mechanisms, they demonstrate sensitivity to dynamical signatures consistent with plausible regime alterations.
 
 % =========================
 % Figure S3
