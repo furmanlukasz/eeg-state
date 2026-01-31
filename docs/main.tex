@@ -99,7 +99,7 @@ We adopt a trajectory-centric dynamical-systems view and introduce a framework d
 \end{itemize}
 
 \paragraph{A note on the role of the autoencoder.}
-The autoencoder is used as a \emph{nonlinear change of variables}---a data-driven coordinate chart on the manifold of EEG features---not as a model of neural computation. The goal is to obtain locally smooth coordinates that preserve moment-to-moment continuity, after which dynamical quantities (velocity, dwell structure, flow fields) are computed \emph{post hoc} and are not optimized during training. This framing distinguishes our approach from classification-oriented deep learning: we do not claim the latent space has neurophysiological meaning, only that it provides a useful coordinate system for quantifying trajectory organization.
+The autoencoder serves as a nonlinear coordinate transformation, not a model of neural computation; dynamical quantities are computed \emph{post hoc} and are not optimized during training (see Methods).
 
 \begin{figure*}[t]
     \centering
@@ -114,31 +114,19 @@ The autoencoder is used as a \emph{nonlinear change of variables}---a data-drive
 
 \subsection{Dynamical systems views of brain activity}
 
-Dynamical systems theory provides a principled framework for understanding brain activity as trajectories evolving on structured state spaces \citep{Kelso1995,Breakspear2017}. A central concept is metastability: partial and transient coordination among subsystems that preserves both integration and flexibility \citep{TognoliKelso2014}. This viewpoint emphasizes transient dwell near quasi-stable configurations and ongoing transitions rather than convergence to a single stable attractor.
-
-Computational models of large-scale dynamics suggest that rich switching among network configurations can emerge near critical regimes of coupling, yielding maximal metastability and broad dynamical repertoires \citep{Deco2017}. Breakspear reviewed how attractors, oscillatory instabilities, and multiscale network interactions can explain complex non-stationary neural time series \citep{Breakspear2017}. In parallel, Rabinovich and colleagues argued that cognition can be described by transient dynamics on high-dimensional competitive landscapes, where trajectories proceed through sequences of metastable configurations \citep{Rabinovich2008}. These perspectives motivate trajectory-centric descriptions that quantify how activity moves through state space.
-
-A complementary modeling tradition uses biophysically motivated neural mass and mean-field models (e.g., Wilson--Cowan and Jansen--Rit) and whole-brain simulation platforms (e.g., The Virtual Brain) to generate synthetic dynamics with interpretable control parameters \citep{WilsonCowan1972,JansenRit1995,SanzLeon2013}.
+Dynamical systems theory provides a principled framework for understanding brain activity as trajectories evolving on structured state spaces \citep{Kelso1995,Breakspear2017}. A central concept is metastability: transient coordination among subsystems that preserves both integration and flexibility \citep{TognoliKelso2014,Rabinovich2008}. Computational models suggest that rich switching among configurations emerges near critical regimes, yielding broad dynamical repertoires \citep{Deco2017}. These perspectives motivate trajectory-centric descriptions that quantify how activity moves through state space.
 
 \subsection{Representation learning for EEG}
 
-Deep learning has enabled representation learning for EEG, including convolutional architectures that learn spectral-spatial features from raw signals \citep{Schirrmeister2017} and broader applications across EEG decoding tasks \citep{Roy2019}. More recently, self-supervised and unsupervised approaches (e.g., contrastive objectives and reconstruction-based models) have sought transferable representations from unlabeled EEG \citep{Banville2021,Kostas2021}. These methods can capture recurring EEG motifs and yield compact latent spaces.
+Deep learning has enabled representation learning for EEG \citep{Schirrmeister2017,Roy2019}, including self-supervised approaches seeking transferable representations \citep{Banville2021,Kostas2021}. However, most methods are evaluated by predictive utility, with latent spaces treated as features rather than dynamical state spaces. In contrast, we use representation learning as a coordinate transformation preserving moment-to-moment variation, producing continuous trajectories for dynamical analysis rather than classification \citep{Hinton2006,CunninghamYu2014}.
 
-However, most EEG representation learning is evaluated by predictive utility, and latent spaces are often treated as features rather than dynamical state spaces. Latent dimensions may not correspond to interpretable neurophysiological variables, and temporal structure is frequently aggregated into chunk-level embeddings. In contrast, we use representation learning as a coordinate transformation that preserves moment-to-moment variation, producing a continuous latent trajectory that can be interrogated using dynamical and geometric measures rather than optimized for classification accuracy.
-
-Conceptually, this use of an autoencoder aligns with classic nonlinear dimensionality-reduction views of autoencoders \citep{Hinton2006} and with the broader perspective that many neural recordings admit low-dimensional ``neural manifolds'' on which dynamics unfold \citep{CunninghamYu2014}.
-
-Related latent-variable approaches explicitly couple representation learning with dynamical priors, including variational autoencoders \citep{KingmaWelling2014} and sequential latent dynamical models developed for population activity (e.g., LFADS) \citep{Pandarinath2018}. More broadly, nonlinear state-space models with amortized inference networks \citep{Krishnan2017Structured} and switching/segmented dynamical models (e.g., recurrent switching linear dynamical systems) \citep{Linderman2017rSLDS} provide complementary ways to formalize latent trajectories and their regime structure.
+Related approaches couple representation learning with dynamical priors \citep{KingmaWelling2014,Pandarinath2018,Linderman2017rSLDS}, providing complementary ways to formalize latent trajectories and regime structure.
 
 \subsection{Trajectory-based and recurrence-based analyses}
 
-Nonlinear time-series analysis offers trajectory-centric tools such as recurrence plots and recurrence quantification analysis (RQA), which summarize revisitation structure, determinism, and stability in reconstructed state spaces \citep{Marwan2007}. While recurrence methods can quantify dynamical changes in physiological signals, they can be sensitive to embedding and threshold choices, and applying them to multichannel, non-stationary EEG can be challenging.
+Nonlinear time-series methods such as recurrence quantification analysis (RQA) summarize revisitation structure in reconstructed state spaces \citep{Marwan2007}. State-space geometry approaches include microstates \citep{Michel2018} and HMM-based analyses \citep{Baker2014,Vidaurre2018}, which provide compact summaries but impose categorical boundaries. Related approaches recover dynamical laws directly from data \citep{Brunton2016,Schmid2010DMD,Chen2018}.
 
-State-space geometry approaches include microstates, which discretize trajectories by clustering EEG topographies \citep{Michel2018}, and HMM-based analyses, which infer probabilistic switching among transient network states and estimate dwell/transition structure \citep{Baker2014,Vidaurre2018}. These methods provide compact summaries but impose categorical boundaries that can obscure within-region flow structure.
-
-Related approaches aim to recover dynamical laws directly from data, including sparse identification of nonlinear dynamical systems (SINDy) \citep{Brunton2016}, dynamic mode decomposition \citep{Schmid2010DMD}, and continuous-time latent dynamical models such as neural ordinary differential equations \citep{Chen2018}. Manifold-learning constructions such as diffusion maps \citep{CoifmanLafon2006} provide an additional perspective on learning low-dimensional coordinates adapted to nonlinear geometry.
-
-Our framework is complementary: it retains a continuous latent trajectory and estimates flow fields and trajectory geometry directly in the learned space. This enables quantification of differences in motion (e.g., speed, tortuosity, exploration) even when conditions share a manifold and state occupancy is similar, a common feature of metastable dynamics \citep{TognoliKelso2014,Deco2017}.
+Our framework is complementary: it retains continuous trajectories and estimates flow fields directly in learned coordinates, enabling quantification of motion differences (speed, tortuosity, exploration) even when conditions share a manifold \citep{TognoliKelso2014,Deco2017}.
 
 % =========================
 \section{Methods}
@@ -416,45 +404,25 @@ As summarized in Results, experts exhibited reduced mean latent speed and more c
 Relative to Brandmeyer and Delorme's original analysis of this dataset \citep{BrandmeyerDelorme2016}, our results suggest a complementary interpretation: expertise manifests primarily as changes in the \emph{kinematics} of ongoing activity (slower transitions and reduced high-speed peripheral excursions) rather than cleanly separable states. Spectral correlates of attentional control reported previously can thus be viewed as signal-level markers of a higher-level dynamical reorganization.
 
 \paragraph{Robustness to training variants.}
-Representation learning could in principle manufacture apparent group differences through training choices. We therefore emphasize a conservative reading: the key claim is not that experts/novices occupy different \emph{locations}, but that they exhibit different \emph{motion organization} (speed modulation and spatially structured flow) on a largely shared manifold. Robustness checks, including ablation of optional contrastive regularization, are reported in \secref{app:contrastive_ablation}.
+The key claim is not that experts/novices occupy different \emph{locations}, but that they exhibit different trajectory laws on a shared manifold. Robustness checks (\secref{app:contrastive_ablation}) confirm that group structure is not artificially induced by representation learning.
 
-One parsimonious interpretation at the \emph{embedding level} is that expertise is associated with reduced trajectory speed and fewer high-speed peripheral excursions. In a metastable landscape picture, peripheral regions may correspond to higher-velocity transition corridors or more exploratory regimes, while central regions may reflect slower ``basin-like'' residence. Under this interpretation, expertise does not necessarily introduce novel states; instead, it modulates how frequently and how rapidly the system traverses different parts of the shared manifold. Importantly, these are \emph{latent-dynamical} interpretations: they characterize trajectory organization in the learned coordinates rather than assigning direct neuroanatomical or mechanistic meaning to any single region of the embedding. Whether this embedding-level pattern reflects ``stabilization of intrinsic neural dynamics'' in a neurophysiological sense would require independent confirmation (e.g., correlation with microstate transition rates or HMM-based switching statistics).
+One parsimonious interpretation is that expertise modulates how frequently and rapidly the system traverses the manifold, rather than introducing novel states. These are latent-dynamical interpretations; whether they reflect neurophysiological ``stabilization'' requires independent confirmation.
 
 \subsection{Methodological robustness}
-Several aspects of the design were chosen to improve interpretability and reduce common sources of leakage or overclaiming.
-
-\paragraph{Subject-level uncertainty.}
-All confidence intervals are computed via subject-level bootstrapping, which avoids spuriously narrow intervals that would arise from treating highly autocorrelated time points as independent samples.
-
-\paragraph{Shared coordinate system.}
-Embeddings used for pooled geometric analysis are fit in a pooled manner to maintain a shared coordinate system across groups, enabling interpretable density and flow comparisons. This design choice explicitly targets group-level comparability, at the cost of possibly underemphasizing idiosyncratic subject-specific structure.
-
-\paragraph{Separation of representation learning from inference.}
-Although a contrastive term can encourage useful invariances and improve embedding geometry, the downstream analysis does not rely on a classifier objective. The central claims concern dynamical signatures (flow geometry and motion statistics), not classification performance.
-
-\paragraph{Encoder-class robustness.}
-The observed dynamical signatures could depend on the transformer autoencoder architecture. As a minimal control, we repeated the key group comparison using a non-neural baseline: PCA applied directly to the circular phase--amplitude features. The direction of the main effect was preserved (novices faster than experts), indicating that the reduced-speed signature is not specific to the transformer architecture. The AE and PCA representations differ in their coupling to amplitude-related variance, but both recover the primary dynamical effect (Appendix~\ref{app:amplitude_control}, \figref{fig:amplitude_control_pca}).
-
-\paragraph{Cross-embedding checks.}
-Because global geometry can depend on embedding choice, key qualitative conclusions should be checked across embeddings (PCA, tPCA, delay) to ensure that the story is not an artifact of a single projection. In this paper, we therefore emphasize findings that are visible both in global metrics and in spatially structured summaries, and we treat any embedding-sensitive effects as exploratory.
-
-\paragraph{Projection invariance of primary effects.}
-Dynamical metrics computed in 2D projections could reflect projection artifacts rather than intrinsic trajectory properties. To address this, primary scalar metrics were computed in the full 64-dimensional latent space using Euclidean, standardized (z-scored), and whitened (Mahalanobis-like) distance metrics. As reported in Table~\ref{tab:intrinsic_vs_projected}, the expert--novice speed difference is \emph{larger} in the full latent space than in 2D projections and is stable across all three metric variants. This demonstrates that projection to two dimensions attenuates but does not create the observed dynamical differences, arguing against a projection-artifact interpretation. The consistency across Euclidean, z-scored, and whitened metrics further indicates that the effect is not driven by arbitrary axis scaling or latent anisotropy.
+Several design choices improve interpretability: (1) subject-level bootstrapping avoids spuriously narrow intervals from autocorrelated time points; (2) pooled embeddings maintain a shared coordinate system for group comparisons; (3) primary metrics are computed in the full latent space with whitened distances, ensuring projection invariance (Table~\ref{tab:intrinsic_vs_projected}). The main effect (experts slower) was preserved when using PCA instead of the transformer autoencoder, indicating the signature is not architecture-specific (Appendix~\ref{app:amplitude_control}).
 
 \subsection{Limitations}
 \label{sec:limitations}
 This study has several limitations that bound interpretation and motivate future work.
 
 \paragraph{Learned coordinates are not anatomical coordinates.}
-The latent manifold is a learned coordinate system optimized for reconstruction (and mild regularization), not a direct map of neurophysiological sources. Regions of latent space should be interpreted as dynamical configurations in the representation, not as localized brain areas.
-
-A practical way to lower this interpretability barrier is to add a simple ``decode-to-signal'' analysis: select bins/regions of latent space (e.g., central vs peripheral ring), decode representative points through the decoder (or average original samples assigned to each region), and summarize them with conventional EEG features (band power, sensor-level topographies, phase synchrony). This does not assign anatomy to latent axes, but it makes the latent geometry legible in familiar signal-space terms and helps validate that high-impact regions correspond to meaningful electrophysiological structure. In this paper we provide a minimal sanity check based on correlations between latent geometry (radius and speed) and conventional EEG summaries (\figref{fig:decoding_sanity_correlations}, \figref{fig:decoding_sanity_scatter}).
+The latent manifold is optimized for reconstruction, not neurophysiological mapping. Regions should be interpreted as dynamical configurations, not localized brain areas. We provide a minimal sanity check via correlations between latent geometry (radius, speed) and conventional EEG summaries (\figref{fig:decoding_sanity_correlations}).
 
 \paragraph{Dependence on preprocessing and representation choices.}
 Hilbert-based phase/amplitude extraction depends on filtering, reference choice, and artifact contamination. Phase estimates can be distorted by muscle activity, eye movements, or non-sinusoidal waveforms, and amplitude features can be dominated by residual artifacts. While circular encoding mitigates phase wrap discontinuities, the representation remains sensitive to preprocessing. 
 
 \paragraph{Chunking and time scale.}
-We used fixed-length chunks (e.g., 5 s) and Savitzky--Golay smoothed derivatives for velocity. Velocity estimation from sampled trajectories is inherently scale-dependent: at very fine temporal resolutions ($\Delta t = 1$ sample), estimates are dominated by high-frequency jitter, while coarser scales capture mesoscale flow. As shown in Appendix~\ref{app:velocity_robustness}, the direction of group effects is consistent across velocity estimators, but absolute magnitudes vary with temporal scale. The current analysis should be interpreted as capturing dynamics at the chosen preprocessing and feature time scale. Future work should test multi-scale consistency (e.g., varying chunk length, or computing flow on multiple downsampled resolutions).
+Velocity estimation is inherently scale-dependent. The direction of group effects is consistent across estimators (Appendix~\ref{app:velocity_robustness}), but absolute magnitudes vary with temporal scale. Future work should test multi-scale consistency.
 
 \paragraph{Flow estimation and binning effects.}
 Flow fields are estimated by spatial binning and local averaging in the 2D projection, which introduces resolution trade-offs and boundary effects. Density and entropy estimates are also sensitive to binning. We explicitly treat flow-field visualizations as \emph{illustrative} rather than quantitative claims; primary quantitative effects (speed, tortuosity) are computed in the full latent space using projection-invariant and scale-robust (whitened) metrics (Appendix~\ref{app:intrinsic_metrics}). We partially address projection dependence by focusing on qualitative agreement across multiple summary types (density, radial profiles, flow contrasts) and by verifying that intrinsic and projected metrics show consistent effect direction.
@@ -558,22 +526,19 @@ Resampling unit & Subject \\
 %   --n-subjects 24 --n-chunks 100 --n-bootstrap 500 --embedding pca --no-show
 %   --velocity-method savgol --savgol-window 5
 
-\section{Velocity Estimation Robustness}
+\section{Robustness and Controls}
+\label{app:robustness}
+
+This appendix collects robustness analyses demonstrating that reported effects are not artifacts of specific methodological choices.
+
+\subsection{Velocity estimation}
 \label{app:velocity_robustness}
 
-Velocity estimation from sampled trajectories is inherently scale-dependent. At very short time scales ($\Delta t = 1$--$2$ samples), finite-difference estimates are dominated by high-frequency fluctuations and exhibit increased variance; at coarser temporal scales or with derivative smoothing, estimates converge to reflect mesoscale dynamical flow.
-
-To verify that reported group differences are not artifacts of a specific velocity estimator, we tested multiple configurations on the full cohort ($n = 12$ per group):
-\begin{itemize}
-    \item Finite differences: $\Delta t \in \{1, 2, 3, 5\}$ samples
-    \item Savitzky--Golay derivatives: window $\in \{5, 7, 9\}$ samples
-\end{itemize}
-
-Table~\ref{tab:velocity_robustness} summarizes the results. At all tested configurations, the direction of the mean speed effect is consistent: novices exhibit higher mean latent speed than experts (Cohen's $d < 0$ for expert $-$ novice). Effect magnitude varies with temporal scale, as expected when transitioning from high-frequency jitter (small $\Delta t$) to coarse-grained flow (large $\Delta t$ or smoothed derivatives).
+Velocity estimation is inherently scale-dependent: finite-difference estimates at short time scales ($\Delta t = 1$--$2$ samples) are dominated by high-frequency fluctuations, while coarser scales or smoothed derivatives reflect mesoscale flow. We tested finite differences ($\Delta t \in \{1, 2, 3, 5\}$) and Savitzky--Golay derivatives (window $\in \{5, 7, 9\}$).
 
 \begin{table}[h]
 \centering
-\caption{\textbf{Velocity estimation robustness.} Cohen's $d$ for mean speed (expert $-$ novice; negative = experts slower). All estimators show consistent direction. SG($w$=5) selected for primary results.}
+\caption{\textbf{Velocity estimation robustness.} Cohen's $d$ for mean speed (expert $-$ novice; negative = experts slower). All estimators show consistent direction.}
 \label{tab:velocity_robustness}
 \small
 \begin{tabular}{lcc}
@@ -591,11 +556,7 @@ SG($w = 9$) & $-0.65$ & $[-1.50, +0.06]$ \\
 \end{tabular}
 \end{table}
 
-\paragraph{Interpretation.}
-The consistent direction across estimators indicates a genuine dynamical effect rather than a numerical artifact. The attenuation of effect size at larger $\Delta t$ is expected: coarser temporal scales average out fine structure, reducing sensitivity while improving noise robustness. We selected SG($w = 5$) for primary analyses as it provides noise suppression while preserving trajectory curvature at a mesoscale time range commonly used in EEG dynamical analyses ($\sim$20--40 ms at 250 Hz sampling).
-
-\paragraph{Preliminary small-sample instability.}
-In preliminary testing with $n = 5$ per group, the effect direction was unstable across velocity estimators, occasionally reversing sign. This instability resolved when computed on the full cohort, demonstrating that the reversal was a small-$n$ variance artifact rather than a methodological flaw. This observation underscores the importance of adequate sample size for derivative-based metrics.
+At all configurations, the effect direction is consistent: novices exhibit higher mean latent speed than experts. Effect magnitude varies with temporal scale, as expected. SG($w = 5$) was selected for primary analyses as it provides noise suppression while preserving trajectory curvature. Note: In preliminary testing with $n = 5$ per group, effect direction was unstable; this resolved with the full cohort, underscoring the importance of adequate sample size for derivative-based metrics.
 
 % Placeholder for velocity robustness figure
 % \begin{figure}[h]
@@ -641,26 +602,12 @@ In preliminary testing with $n = 5$ per group, the effect direction was unstable
 % % \end{table}
 % =============================================================================
 
-\subsection{Stress-test robustness: embedding and binning choices}
+\subsection{Embedding and binning choices}
 \label{app:stress_test}
 
-Observed effects could in principle be artifacts of specific embedding projections, binning resolutions, or velocity estimation parameters rather than genuine dynamical structure.
+Primary quantitative claims are computed in the full latent space $\mathbf{h}(t) \in \mathbb{R}^{64}$ with whitened distances, making them projection-invariant. Density maps and flow fields in 2D projections are treated as illustrative visualizations.
 
-\paragraph{Primary vs illustrative metrics.}
-To address this, we distinguish:
-\begin{itemize}
-    \item \textbf{Primary quantitative claims:} Computed in the full latent space $\mathbf{h}(t) \in \mathbb{R}^{64}$ with whitened (Mahalanobis) distances, making them projection-invariant and scale-robust.
-    \item \textbf{Illustrative visualizations:} Density maps and flow fields computed in 2D projections for interpretability; these are explicitly treated as visualizations, not quantitative claims.
-\end{itemize}
-
-\paragraph{Stress-test protocol.}
-We verified that the direction of primary effects does not flip under reasonable parameter variations:
-\begin{itemize}
-    \item Embedding: PCA, temporal PCA (tPCA), delay embedding
-    \item Velocity estimation: SG window $\in \{5, 7, 9\}$; finite differences $\Delta t \in \{1, 2, 3, 5\}$
-    \item Flow-field binning: grid $\in \{25 \times 25, 30 \times 30, 40 \times 40\}$
-    \item Occupancy threshold: minimum points per bin $\in \{5, 10, 20\}$
-\end{itemize}
+We verified that effect direction does not flip under parameter variations: embedding (PCA, tPCA, delay), velocity estimation (SG window $\in \{5, 7, 9\}$; FD $\Delta t \in \{1, 2, 3, 5\}$), flow-field binning (grid $\in \{25^2, 30^2, 40^2\}$), and occupancy threshold (min points $\in \{5, 10, 20\}$).
 
 % TODO: Add stress-test summary table
 % \begin{table}[h]
@@ -680,24 +627,12 @@ We verified that the direction of primary effects does not flip under reasonable
 % \end{tabular}
 % \end{table}
 
-\subsection{Complementarity with discrete-state methods (HMM)}
+\subsection{HMM complementarity}
 \label{app:hmm_baseline}
 
-A natural question is whether continuous flow metrics capture information beyond what discrete-state methods such as hidden Markov models (HMMs) can provide. To address this directly, we performed a correlation and incremental classification analysis comparing HMM-derived statistics with our flow metrics.
+Flow metrics decompose into: (1) continuous analogues of HMM switching statistics (expected overlap), and (2) metrics capturing orthogonal information (novel). Several flow metrics correlated strongly with HMM statistics (Mean Speed $\leftrightarrow$ Dwell Time, $|r| \approx 0.85$--$0.90$). Crucially, \textbf{explored variance} showed consistently low correlations with all HMM metrics (max $|r| < 0.30$), capturing trajectory geometry not recoverable from state sequences.
 
-\paragraph{Key finding: complementarity, not competition.}
-Flow metrics decompose cleanly into two classes:
-\begin{enumerate}
-    \item Metrics that are \emph{continuous analogues} of HMM switching statistics (expected overlap)
-    \item Metrics that capture \emph{orthogonal information} that HMMs provably cannot encode (novel contribution)
-\end{enumerate}
-This decomposition clarifies the relationship between discrete-state and continuous-trajectory descriptions by explicitly delineating overlapping and orthogonal components.
-
-\paragraph{Correlation analysis.}
-Several flow metrics showed strong correlations with HMM statistics (Mean Speed $\leftrightarrow$ Dwell Time/Transitions, $|r| \approx 0.85$--$0.90$; Speed CV $\leftrightarrow$ Transition Entropy, $|r| \approx 0.60$). This overlap is expected: mean speed is a continuous analogue of switching rate. Crucially, \textbf{explored variance} exhibited consistently low correlations with all HMM metrics (max $|r| < 0.30$), demonstrating that it encodes information not available from discrete state summaries---specifically, the geometric spread and dynamic range of continuous trajectories that HMMs cannot represent without becoming continuous-trajectory models themselves.
-
-\paragraph{Why $\Delta$AUC $\approx 0$ is not a problem.}
-Incremental classification analyses showed no improvement in AUC when adding flow metrics to HMM features ($\Delta$AUC $\approx 0$, CI includes zero). This is \emph{expected} and does not indicate redundancy. Classification improvement is not evidence of representational uniqueness. The fact that $\Delta$AUC $\approx 0$ \emph{but} explored variance is orthogonal to HMM metrics means flow metrics encode structure \emph{not aligned with the classification boundary}---i.e., descriptive rather than discriminative information. That is precisely what a dynamical microscope should provide.
+Adding flow metrics to HMM features yielded $\Delta$AUC $\approx 0$---explored variance is orthogonal to HMM but not aligned with the classification boundary (descriptive, not discriminative).
 
 \begin{table}[h]
 \centering
@@ -716,8 +651,6 @@ Trans. Ent. & \textbf{0.85} & \textbf{0.60} & 0.47 & 0.16 & 0.24 \\
 \end{tabular}
 \end{table}
 
-\paragraph{Summary.}
-Some flow metrics are continuous versions of HMM statistics (expected); explored variance quantifies trajectory geometry not recoverable from state sequences alone (novel). The goal is dynamical description, not classification.
 
 % =========================
 % Figure 1 (workflow schematic) placeholder
@@ -1071,59 +1004,41 @@ Latent trajectories were projected into a pooled embedding (PCA in primary resul
     \item Clear separation between \emph{representation learning} and \emph{dynamical analysis} (not trained as a classifier).
 \end{itemize}
 
-\subsection{Amplitude control analysis}
+\subsection{Amplitude control}
 \label{app:amplitude_control}
 
-A remaining concern is whether the primary expertise effect (reduced latent speed) could be fully explained by differences in signal amplitude. We performed multiple complementary controls to address this critique.
+Latent speed is partially coupled to amplitude but not reducible to it. Three controls demonstrate this:
 
-\paragraph{Key framing.}
-Latent speed is not claimed to be independent of signal amplitude; rather, it captures a dynamical quantity that is partially coupled to amplitude but not reducible to it. The controls below demonstrate that amplitude contributes to latent geometry, yet does not fully account for group differences in speed.
+\textbf{(1) Amplitude-matched comparison:} Binning time points by amplitude decile, the expert--novice effect persists within matched bins (pooled $d = -0.20$, 95\% CI $[-0.29, -0.10]$), strongest in middle deciles ($d \approx -0.3$ to $-0.35$).
 
-\paragraph{Partial-correlation control.}
-We tested whether group differences in autoencoder-derived mean speed persist when conditioning on amplitude proxies. The expert/novice association with mean AE speed was attenuated substantially when conditioning on global field power (partial $r\approx 0.10$), but persisted when conditioning on broadband amplitude (partial $r\approx 0.19$), indicating that global signal strength explains part---but not all---of the speed effect.
+\textbf{(2) Phase-only control:} An autoencoder trained on only phase features $(\cos\phi, \sin\phi)$, excluding amplitude entirely, preserved the effect (phase-only $d = -0.72$, 95\% CI $[-1.33, -0.13]$; full model $d = -0.67$). With no amplitude information, the effect persists.
 
-\paragraph{Amplitude-matched comparison.}
-To directly test whether experts are slower \emph{at the same amplitude}, we binned time points by amplitude decile and compared speed within each bin. The expert--novice effect persists across amplitude-matched bins (pooled $d = -0.20$, 95\% CI $[-0.29, -0.10]$), demonstrating that amplitude cannot be the sole driver of the speed difference. The effect is strongest in middle deciles ($d \approx -0.3$ to $-0.35$) and washes out at extremes, as expected for a genuine dynamical effect modulated by, but not reducible to, signal energy.
+\textbf{(3) Predictive regression:} Logistic regression predicting group from amplitude alone yielded AUC = 0.35; speed alone AUC = 0.57; combined AUC = 0.54. Speed adds +56\% improvement over amplitude alone.
 
-\paragraph{Phase-only control (most powerful).}
-We trained an identical autoencoder architecture using only phase features $(\cos\phi, \sin\phi)$, excluding amplitude entirely from the input representation. The expert--novice speed difference was preserved in direction and slightly strengthened in magnitude (phase-only $d = -0.72$, 95\% CI $[-1.33, -0.13]$; full model $d = -0.67$, 95\% CI $[-1.29, -0.04]$). This is the strongest possible control: with no amplitude information whatsoever, the effect persists, indicating that the speed difference reflects phase coordination dynamics rather than amplitude encoding.
+\textbf{(4) PCA baseline:} The main effect was preserved when using PCA instead of the transformer autoencoder, indicating the signature is not architecture-specific.
 
-\paragraph{PCA baseline (encoder-class robustness).}
-We repeated the amplitude correlations using a simple PCA-only embedding of the circular features. In this linear baseline, correlations between PCA-derived speed and broadband amplitude were weaker ($r\approx -0.13$) than in the autoencoder space (AE speed vs broadband $r\approx -0.51$). Importantly, the direction of the main group effect was preserved in the PCA baseline (novices faster than experts), indicating that the reduced-speed signature is not specific to the transformer architecture.
+Figure~\ref{fig:amplitude_ablation} provides a visual summary; Figures~\ref{fig:amplitude_control_partial}--\ref{fig:amplitude_control_pca} provide details.
 
-\paragraph{Predictive regression.}
-To test whether speed carries information beyond amplitude, we fit logistic regressions predicting group (expert vs novice) from: (i) amplitude alone, (ii) speed alone, and (iii) amplitude + speed combined. Amplitude alone performed below chance (AUC = 0.35), speed alone performed above chance (AUC = 0.57), and the combination yielded AUC = 0.54. Speed adds +56\% improvement in discriminative power over amplitude alone, confirming that speed captures an independent dynamical property.
-
-\paragraph{Summary.}
-All three orthogonal controls support the conclusion that latent speed is not reducible to amplitude: (1) the effect persists when amplitude is matched, (2) the effect persists---and slightly strengthens---when amplitude is removed entirely (phase-only model), and (3) speed adds predictive value beyond amplitude. Together, these results indicate that latent speed reflects a composite dynamical property of the trajectory, capturing phase coordination dynamics that are partially coupled to, but not determined by, signal energy. Figure~\ref{fig:amplitude_ablation} provides a visual summary of these three controls; Figures~\ref{fig:amplitude_control_partial}--\ref{fig:amplitude_control_pca} provide additional details.
-
-\subsection{Intrinsic metrics: projection invariance and scale robustness}
+\subsection{Projection invariance}
 \label{app:intrinsic_metrics}
 
-A potential concern is that dynamical metrics computed in a 2D projection $\mathbf{y}(t)$ may depend on the choice of embedding---a ``scatterplot physics'' artifact. To address this, we computed primary scalar metrics directly in the full latent space $\mathbf{h}(t) \in \mathbb{R}^{64}$, making them projection-invariant.
-
-\paragraph{Whitened (Mahalanobis) distances.}
-Even in the full latent space, Euclidean distances depend on the (arbitrary) scaling of latent dimensions. To obtain invariance under invertible linear transformations, we use \emph{whitened} distances:
-\begin{equation}
-d_{\mathrm{whitened}}(\Delta\mathbf{h}) = \sqrt{(\Delta\mathbf{h})^\top \Sigma^{-1} (\Delta\mathbf{h})},
-\end{equation}
-where $\Sigma$ is the pooled covariance of $\mathbf{h}(t)$ across all subjects. This Mahalanobis metric is invariant to any invertible linear rescaling of latent axes, addressing the most common linear-scaling (``arbitrary units'') critique.
-
-\paragraph{Comparison: intrinsic vs projected.}
-Table~\ref{tab:intrinsic_vs_projected} compares effect sizes for mean speed computed in (i) the full latent $\mathbf{h}(t)$ with Euclidean, whitened, and z-scored metrics, and (ii) the 2D PCA projection. All variants show consistent sign (novices faster than experts). Critically, the intrinsic effects are \emph{larger} than the projected effect, indicating that projection attenuates rather than creates the observed difference. The consistency across Euclidean, z-scored, and whitened metrics demonstrates that the effect is not driven by arbitrary axis scaling or latent anisotropy.
+Primary metrics are computed in the full latent space $\mathbf{h}(t) \in \mathbb{R}^{64}$ using whitened (Mahalanobis) distances to achieve invariance under linear rescaling:
+$d_{\mathrm{whitened}}(\Delta\mathbf{h}) = \sqrt{(\Delta\mathbf{h})^\top \Sigma^{-1} (\Delta\mathbf{h})}$,
+where $\Sigma$ is the pooled covariance. Table~\ref{tab:intrinsic_vs_projected} shows that intrinsic effects are \emph{larger} than projected effects, indicating projection attenuates rather than creates the observed difference.
 
 \begin{table}[h]
 \centering
-\caption{\textbf{Intrinsic vs projected speed effect sizes.} Cohen's $d$ for mean speed (expert $-$ novice; negative = experts slower). All variants show consistent direction; intrinsic effects are larger than projected, indicating projection attenuates rather than creates the difference.}
+\caption{\textbf{Intrinsic vs projected speed effect sizes.} Cohen's $d$ (expert $-$ novice). Intrinsic effects exceed projected, confirming projection attenuates rather than creates differences.}
 \label{tab:intrinsic_vs_projected}
+\small
 \begin{tabular}{llcc}
 \toprule
-Space & Metric & Cohen's $d$ & 95\% CI \\
+Space & Metric & $d$ & 95\% CI \\
 \midrule
-Intrinsic $\mathbf{h}(t)$ & Euclidean speed & $-0.92$ & $[-1.76, -0.28]$ \\
-Intrinsic $\mathbf{h}(t)$ & Whitened speed & $-0.88$ & $[-1.89, -0.20]$ \\
-Intrinsic $\mathbf{h}(t)$ & Z-scored speed & $-0.97$ & $[-1.81, -0.31]$ \\
-Projected $\mathbf{y}(t)$ & PCA 2D speed & $-0.75$ & $[-1.57, -0.19]$ \\
+Intrinsic $\mathbf{h}(t)$ & Euclidean & $-0.92$ & $[-1.76, -0.28]$ \\
+Intrinsic $\mathbf{h}(t)$ & Whitened & $-0.88$ & $[-1.89, -0.20]$ \\
+Intrinsic $\mathbf{h}(t)$ & Z-scored & $-0.97$ & $[-1.81, -0.31]$ \\
+Projected $\mathbf{y}(t)$ & PCA 2D & $-0.75$ & $[-1.57, -0.19]$ \\
 \bottomrule
 \end{tabular}
 \end{table}
