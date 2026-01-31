@@ -1,0 +1,35 @@
+# Transformer model configuration - PHASE ONLY (no amplitude)
+# For amplitude control ablation: proves speed effect is not just amplitude proxy
+#
+# Usage:
+#   python -m eeg_biomarkers.training.train model=transformer_phase_only data=meditation_bids
+#
+name: "transformer_autoencoder"
+
+encoder:
+  complexity: 2  # 0-3, controls network depth (conv layers before transformer)
+  hidden_size: 64  # Transformer dimension
+  dropout: 0.1
+
+  # Transformer-specific settings
+  n_heads: 4  # Number of attention heads
+  n_transformer_layers: 2  # Number of transformer encoder/decoder layers
+  dim_feedforward: 384  # Match the ff384 config used in main experiments
+
+decoder:
+  # Mirrors encoder by default
+  use_encoder_config: true
+  constrain_output: true  # Apply tanh to cos/sin outputs
+
+# Recurrence matrix settings
+recurrence:
+  threshold_method: "rr_controlled"
+  target_rr: 0.02
+  fixed_epsilon: null
+
+# Phase representation - PHASE ONLY (no amplitude)
+# This is the key difference from transformer.yaml
+phase:
+  representation: "circular"  # z_c(t) = [cos φ, sin φ]
+  include_amplitude: false    # NO AMPLITUDE - critical for ablation
+  normalize_amplitude: false  # Not applicable when amplitude excluded

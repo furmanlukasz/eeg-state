@@ -271,6 +271,177 @@ def load_and_preprocess_fif(
     )
 
 
+def load_model_and_compute_trajectories(
+    checkpoint_path: Path,
+    device: str = "mps",
+    return_amplitudes: bool = False,
+    max_subjects_per_group: int = None,
+):
+    """
+    Load model and compute latent trajectories (and optionally amplitudes) for all subjects.
+
+    This is the main entry point for amplitude ablation analysis.
+
+    Args:
+        checkpoint_path: Path to model checkpoint
+        device: Device for inference
+        return_amplitudes: If True, also return per-timepoint amplitude values
+        max_subjects_per_group: Limit subjects per group (for testing)
+
+    Returns:
+        If return_amplitudes:
+            (trajectories_by_group, amplitudes_by_group)
+        Else:
+            trajectories_by_group
+
+        Where each is dict[group_name -> list[np.ndarray]]
+    """
+    import torch
+    import ast
+    from tqdm import tqdm
+    from config import (
+        DATASET, DATA_PATHS, get_dataset_config, get_data_files_via_config,
+        get_fif_files, CHUNK_DURATION,
+    )
+
+    # Dynamically import model
+    try:
+        from eeg_biomarkers.models import TransformerAutoencoder
+    except ImportError:
+        print("Warning: eeg_biomarkers not installed, trying legacy import")
+        from scripts.utils import ConvLSTMEEGAutoencoder as TransformerAutoencoder
+
+    # Load checkpoint
+    print(f"Loading checkpoint: {checkpoint_path}")
+    checkpoint = torch.load(checkpoint_path, map_location=device, weights_only=False)
+
+    # Extract config
+    config = checkpoint.get("config", {})
+    model_config_raw = config.get("model", {})
+    if isinstance(model_config_raw, str):
+        model_config = ast.literal_eval(model_config_raw)
+    else:
+        model_config = model_config_raw
+
+    encoder_config = model_config.get("encoder", {})
+    phase_config = model_config.get("phase", {})
+
+    # Determine model parameters
+    state_dict = checkpoint.get("model_state_dict", checkpoint)
+    include_amplitude = phase_config.get("include_amplitude", True)
+    phase_channels = 3 if include_amplitude else 2
+
+    # Infer n_channels from conv layer
+    n_channels = 79  # Default
+    for key in state_dict:
+        if "conv_layers.0.0.weight" in key:
+            input_dim = state_dict[key].shape[1]
+            n_channels = input_dim // phase_channels
+            break
+
+    print(f"  Model: n_channels={n_channels}, phase_channels={phase_channels}, "
+          f"include_amplitude={include_amplitude}")
+
+    # Create model
+    model = TransformerAutoencoder(
+        n_channels=n_channels,
+        hidden_size=encoder_config.get("hidden_size", 64),
+        n_heads=encoder_config.get("n_heads", 4),
+        n_transformer_layers=encoder_config.get("n_transformer_layers", 2),
+        dim_feedforward=encoder_config.get("dim_feedforward", 256),
+        dropout=encoder_config.get("dropout", 0.1),
+        phase_channels=phase_channels,
+    )
+    model.load_state_dict(state_dict)
+    model.eval()
+    model.to(device)
+
+    # Get data files
+    data_dir = DATA_PATHS.get(DATASET)
+    dataset_config = get_dataset_config()
+
+    if dataset_config is not None:
+        data_files = []
+        for group in dataset_config.groups:
+            group_files = dataset_config.get_files_for_group(data_dir, group)
+            for f in group_files:
+                data_files.append((f, group.label, group.name))
+    else:
+        data_files = get_fif_files()
+
+    print(f"  Found {len(data_files)} files")
+
+    # Process each subject
+    trajectories_by_group = {}
+    amplitudes_by_group = {}
+    subjects_per_group = {}
+
+    for file_path, label, group_name in tqdm(data_files, desc="Processing subjects"):
+        # Limit subjects per group if specified
+        if max_subjects_per_group:
+            if subjects_per_group.get(group_name, 0) >= max_subjects_per_group:
+                continue
+
+        try:
+            # Load and preprocess
+            result = load_and_preprocess_file(
+                file_path,
+                chunk_duration=CHUNK_DURATION,
+                include_amplitude=include_amplitude,
+                verbose=False,
+            )
+
+            if len(result["chunks"]) == 0:
+                continue
+
+            # Compute latent trajectories
+            subject_latents = []
+            subject_amplitudes = []
+
+            with torch.no_grad():
+                for chunk in result["chunks"]:
+                    # Prepare input
+                    x = torch.from_numpy(chunk).unsqueeze(0).to(device)
+                    x = x.permute(0, 2, 1)  # (batch, time, features)
+
+                    # Get latent
+                    latent = model.encode(x)  # (batch, time, hidden)
+                    subject_latents.append(latent.squeeze(0).cpu().numpy())
+
+                    if return_amplitudes and include_amplitude:
+                        # Extract amplitude from input features
+                        # Features are [cos*C, sin*C, log_amp*C] = 3*C total
+                        # Amplitude is last third
+                        amp_start = 2 * n_channels
+                        amp_features = chunk[amp_start:, :]  # (C, T)
+                        mean_amp = np.mean(amp_features, axis=0)  # (T,)
+                        subject_amplitudes.append(mean_amp)
+
+            # Concatenate chunks into trajectory
+            if subject_latents:
+                trajectory = np.concatenate(subject_latents, axis=0)
+
+                if group_name not in trajectories_by_group:
+                    trajectories_by_group[group_name] = []
+                trajectories_by_group[group_name].append(trajectory)
+
+                if return_amplitudes and subject_amplitudes:
+                    amplitude = np.concatenate(subject_amplitudes, axis=0)
+                    if group_name not in amplitudes_by_group:
+                        amplitudes_by_group[group_name] = []
+                    amplitudes_by_group[group_name].append(amplitude)
+
+                subjects_per_group[group_name] = subjects_per_group.get(group_name, 0) + 1
+
+        except Exception as e:
+            print(f"  Error processing {file_path.name}: {e}")
+            continue
+
+    if return_amplitudes:
+        return trajectories_by_group, amplitudes_by_group
+    return trajectories_by_group
+
+
 if __name__ == "__main__":
     # Quick test with example file
     from config import DATA_DIR, FILTER_LOW, FILTER_HIGH, CHUNK_DURATION, DATASET

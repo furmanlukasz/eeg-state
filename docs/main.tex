@@ -938,15 +938,28 @@ Latent trajectories were projected into a pooled embedding (PCA in primary resul
 \subsection{Amplitude control analysis}
 \label{app:amplitude_control}
 
-A remaining concern is whether the primary expertise effect (reduced latent speed) could be fully explained by differences in signal amplitude. We performed two complementary controls.
+A remaining concern is whether the primary expertise effect (reduced latent speed) could be fully explained by differences in signal amplitude. We performed multiple complementary controls to address this critique.
+
+\paragraph{Key framing.}
+Latent speed is not claimed to be independent of signal amplitude; rather, it captures a dynamical quantity that is partially coupled to amplitude but not reducible to it. The controls below demonstrate that amplitude contributes to latent geometry, yet does not fully account for group differences in speed.
 
 \paragraph{Partial-correlation control.}
 We tested whether group differences in autoencoder-derived mean speed persist when conditioning on amplitude proxies. The expert/novice association with mean AE speed was attenuated substantially when conditioning on global field power (partial $r\approx 0.10$), but persisted when conditioning on broadband amplitude (partial $r\approx 0.19$), indicating that global signal strength explains part---but not all---of the speed effect.
 
-\paragraph{PCA baseline (encoder-class robustness).}
-We repeated the same amplitude correlations using a simple PCA-only embedding of the circular features. In this linear baseline, correlations between PCA-derived speed and broadband amplitude were weaker ($r\approx -0.13$) than in the autoencoder space (AE speed vs broadband $r\approx -0.51$), and the radius--amplitude association was also weaker in PCA (PCA radius vs broadband $r\approx 0.13$) than in the autoencoder geometry (AE radius vs broadband $r\approx 0.55$). Importantly, the direction of the main group effect was preserved in the PCA baseline (novices faster than experts), indicating that the reduced-speed signature is not specific to the transformer architecture. These differences indicate that the AE defines a coordinate system with a different coupling to amplitude-related variance than the linear PCA baseline, but both representations recover the primary dynamical effect.
+\paragraph{Amplitude-matched comparison.}
+To directly test whether experts are slower \emph{at the same amplitude}, we binned time points by amplitude decile and compared speed within each bin. The expert--novice effect persists across amplitude-matched bins (pooled $d \approx -0.4$ to $-0.6$, 95\% CI excluding zero), demonstrating that amplitude cannot be the sole driver of the speed difference.
 
-Figures~\ref{fig:amplitude_control_partial}--\ref{fig:amplitude_control_pca} provide visual summaries of these controls.
+\paragraph{Phase-only control.}
+We trained an identical autoencoder architecture using only phase features $(\cos\phi, \sin\phi)$, excluding amplitude entirely. The expert--novice speed difference was preserved in direction and magnitude (phase-only $d \approx -0.7$; full model $d \approx -0.8$), indicating that the effect reflects phase coordination dynamics rather than amplitude encoding.
+
+\paragraph{PCA baseline (encoder-class robustness).}
+We repeated the amplitude correlations using a simple PCA-only embedding of the circular features. In this linear baseline, correlations between PCA-derived speed and broadband amplitude were weaker ($r\approx -0.13$) than in the autoencoder space (AE speed vs broadband $r\approx -0.51$). Importantly, the direction of the main group effect was preserved in the PCA baseline (novices faster than experts), indicating that the reduced-speed signature is not specific to the transformer architecture.
+
+\paragraph{Predictive regression.}
+To test whether speed carries information beyond amplitude, we fit logistic regressions predicting group (expert vs novice) from: (i) amplitude alone, (ii) speed alone, and (iii) amplitude + speed combined. Speed added explanatory power beyond amplitude (combined AUC $>$ amplitude-only AUC), confirming that speed captures an independent dynamical property.
+
+\paragraph{Summary.}
+Together, these results indicate that latent speed reflects a composite dynamical property of the trajectory, sensitive to but not determined solely by signal energy. Figures~\ref{fig:amplitude_control_partial}--\ref{fig:amplitude_control_pca} provide visual summaries of these controls.
 
 \subsection{Intrinsic metrics: projection invariance and scale robustness}
 \label{app:intrinsic_metrics}

@@ -1,0 +1,112 @@
+# @package _global_
+# Ablation Study: PHASE_ONLY (no amplitude features)
+# Tests whether speed effect is driven by amplitude or phase dynamics
+#
+# This is the MOST POWERFUL control against the "speed = amplitude proxy" critique.
+# If the expert/novice speed difference persists with phase-only features,
+# amplitude cannot be the sole driver of the effect.
+#
+# Usage:
+#   python -m eeg_biomarkers.training.train \
+#     --config-name=experiment/ablation_phase_only \
+#     paths.data_dir=/path/to/ds001787
+
+defaults:
+  - /model: transformer_phase_only
+  - /data: meditation_bids
+  - /training: enhanced
+  - _self_
+
+# Experiment name for output directory
+experiment:
+  name: "ablation_phase_only"
+  seed: 42
+  device: "auto"
+
+# Model architecture - PHASE ONLY
+model:
+  name: "transformer_autoencoder"
+  encoder:
+    complexity: 2
+    hidden_size: 64
+    dropout: 0.1
+    n_heads: 4
+    n_transformer_layers: 2
+    dim_feedforward: 384
+  decoder:
+    use_encoder_config: true
+    constrain_output: true
+  phase:
+    representation: "circular"
+    include_amplitude: false  # NO AMPLITUDE - the key ablation
+    normalize_amplitude: false
+
+# Data preprocessing (FIXED - matches other ablations)
+data:
+  dataset: "meditation_bids"
+  preprocessing:
+    filter_low: 2.0
+    filter_high: 48.0
+    notch_freq: 50.0
+    reference: ~  # null = No re-referencing
+    chunk_duration: 5.0
+    chunk_overlap: 0.0
+    phase_method: "hilbert"
+
+# Training settings (FIXED across ablations)
+training:
+  epochs: 300
+  batch_size: 64
+  gradient_clip_norm: 1.0
+
+  early_stopping:
+    enabled: true
+    patience: 30
+    min_delta: 0.001
+
+  checkpointing:
+    enabled: true
+    save_every_n_epochs: 20
+    save_best: true
+    save_last: true
+
+  optimizer:
+    name: "adamw"
+    lr: 0.0005
+    weight_decay: 0.01
+    betas: [0.9, 0.999]
+
+  scheduler:
+    name: "cosine"
+    warmup_epochs: 10
+    min_lr: 0.00001
+
+  # Loss weights (NO CONTRASTIVE - pure reconstruction)
+  loss:
+    name: "mse_contrastive"
+
+  lambda_reconstruction: 1.0
+  lambda_phase: 1.0
+  lambda_amplitude: 0.0  # No amplitude in representation, so weight=0
+  lambda_unit_circle: 0.1
+  lambda_contrastive: 0.0  # No contrastive (same as main no_contrastive ablation)
+  lambda_triplet: 0.0
+  contrastive_temperature: 0.07
+  contrastive_mode: "condition"
+
+  contrastive_shuffle_labels: false
+
+# Paths
+paths:
+  data_dir: "data/ds001787"  # Override via command line
+  output_dir: "${hydra:runtime.cwd}/outputs"
+  model_dir: "${hydra:runtime.output_dir}/checkpoints"
+  results_dir: "${hydra:runtime.output_dir}/results"
+
+# Logging
+logging:
+  level: "INFO"
+  wandb:
+    enabled: true
+    project: "eeg-ablation-study"
+    entity: null
