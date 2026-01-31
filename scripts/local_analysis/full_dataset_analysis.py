@@ -55,7 +55,14 @@ from config import (
 )
 from load_model import load_model_from_checkpoint, create_model, compute_latent_trajectory
 from load_data import load_and_preprocess_file
-from velocity import compute_speed as _compute_speed, compute_displacement, VelocityConfig
+from velocity import (
+    compute_speed as _compute_speed,
+    compute_displacement,
+    VelocityConfig,
+    compute_intrinsic_metrics,
+    compute_pooled_normalization,
+    IntrinsicMetrics,
+)
 
 # Global velocity config (set by main() based on CLI args)
 VELOCITY_CONFIG: Optional[VelocityConfig] = None
@@ -709,6 +716,251 @@ def bootstrap_effect_size(
         d_samples.append(d)
 
     return BootstrapResult.from_samples(np.array(d_samples))
+
+
+# =============================================================================
+# INTRINSIC METRICS (Coordinate-Invariant in Full Latent Space)
+# =============================================================================
+
+def compute_intrinsic_group_comparison(
+    intrinsic_metrics_by_group: dict[str, list[IntrinsicMetrics]],
+    subject_data: dict,
+    n_bootstrap: int = 500,
+) -> dict:
+    """
+    Compute group means and effect sizes for intrinsic latent metrics.
+
+    These metrics are computed in the full latent h(t) and are invariant
+    to the choice of 2D projection.
+    """
+    results = {
+        "description": "Intrinsic metrics computed in full latent h(t), invariant to 2D projection",
+        "group_means": {},
+        "effect_sizes": {},
+    }
+
+    # Metric names to compare
+    metric_names = [
+        "mean_speed",          # Euclidean speed in h(t)
+        "mean_speed_whitened", # Mahalanobis speed (linear-scale invariant)
+        "mean_speed_zscored",  # Z-scored speed (simpler normalization)
+        "speed_cv",            # Coefficient of variation
+        "tortuosity",          # Path length / displacement
+        "explored_variance",   # trace(Cov(h))
+    ]
+
+    # Compute group means
+    for group, metrics_list in intrinsic_metrics_by_group.items():
+        results["group_means"][group] = {}
+        for metric_name in metric_names:
+            values = [getattr(m, metric_name) for m in metrics_list]
+            # Filter out inf/nan for tortuosity
+            values = [v for v in values if np.isfinite(v)]
+            if values:
+                results["group_means"][group][metric_name] = {
+                    "mean": float(np.mean(values)),
+                    "std": float(np.std(values)),
+                    "n": len(values),
+                }
+
+    # Compute effect sizes (reference vs comparison groups)
+    ref_group = get_reference_group()
+    ref_metrics = intrinsic_metrics_by_group.get(ref_group, [])
+
+    for comp_group in get_comparison_groups():
+        comp_metrics = intrinsic_metrics_by_group.get(comp_group, [])
+        if len(ref_metrics) < 3 or len(comp_metrics) < 3:
+            continue
+
+        comparison = f"{ref_group} vs {comp_group}"
+        results["effect_sizes"][comparison] = {}
+
+        for metric_name in metric_names:
+            ref_values = np.array([getattr(m, metric_name) for m in ref_metrics])
+            comp_values = np.array([getattr(m, metric_name) for m in comp_metrics])
+
+            # Filter inf/nan
+            ref_mask = np.isfinite(ref_values)
+            comp_mask = np.isfinite(comp_values)
+            ref_values = ref_values[ref_mask]
+            comp_values = comp_values[comp_mask]
+
+            if len(ref_values) >= 3 and len(comp_values) >= 3:
+                bs_result = bootstrap_effect_size(ref_values, comp_values, n_bootstrap)
+                results["effect_sizes"][comparison][metric_name] = {
+                    "cohens_d": bs_result.mean,
+                    "ci_low": bs_result.ci_low,
+                    "ci_high": bs_result.ci_high,
+                }
+
+    return results
+
+
+def plot_intrinsic_vs_projected_comparison(
+    intrinsic_metrics_by_group: dict[str, list[IntrinsicMetrics]],
+    subject_data: dict,
+    all_trajectories: list[np.ndarray],
+    output_dir: Path,
+    n_bootstrap: int = 500,
+    show_plot: bool = True,
+):
+    """
+    Plot comparison of intrinsic (h(t)) vs projected (PCA y(t)) metrics.
+
+    This addresses the reviewer critique about coordinate dependence by showing
+    that the main effect persists in both spaces.
+    """
+    # Compute projected metrics using PCA
+    print("\n  Computing projected metrics for comparison table...")
+    pca_embedder = PooledEmbedder(method="pca")
+    pca_embedder.fit(all_trajectories)
+
+    projected_metrics_by_group = {g: [] for g in subject_data.keys()}
+    for group, subjects in subject_data.items():
+        for subject in subjects:
+            embedded = pca_embedder.transform(subject.trajectory)
+            metrics = compute_flow_metrics(embedded)
+            projected_metrics_by_group[group].append(metrics)
+
+    # Build comparison data
+    ref_group = get_reference_group()
+    comp_groups = get_comparison_groups()
+
+    if not comp_groups:
+        return
+
+    comp_group = comp_groups[0]  # Primary comparison
+
+    # Collect values for each metric type
+    comparison_data = []
+
+    # Intrinsic metrics
+    for metric_name, label in [
+        ("mean_speed", "Speed (Euclidean)"),
+        ("mean_speed_whitened", "Speed (Whitened)"),
+        ("mean_speed_zscored", "Speed (Z-scored)"),
+    ]:
+        ref_vals = np.array([getattr(m, metric_name) for m in intrinsic_metrics_by_group[ref_group]])
+        comp_vals = np.array([getattr(m, metric_name) for m in intrinsic_metrics_by_group[comp_group]])
+
+        ref_vals = ref_vals[np.isfinite(ref_vals)]
+        comp_vals = comp_vals[np.isfinite(comp_vals)]
+
+        if len(ref_vals) >= 3 and len(comp_vals) >= 3:
+            d = cohens_d(ref_vals, comp_vals)
+            bs = bootstrap_effect_size(ref_vals, comp_vals, n_bootstrap)
+            comparison_data.append({
+                "space": "Intrinsic h(t)",
+                "metric": label,
+                "cohens_d": d,
+                "ci_low": bs.ci_low,
+                "ci_high": bs.ci_high,
+            })
+
+    # Projected metrics (PCA)
+    ref_vals = np.array([m.mean_speed for m in projected_metrics_by_group[ref_group]])
+    comp_vals = np.array([m.mean_speed for m in projected_metrics_by_group[comp_group]])
+
+    if len(ref_vals) >= 3 and len(comp_vals) >= 3:
+        d = cohens_d(ref_vals, comp_vals)
+        bs = bootstrap_effect_size(ref_vals, comp_vals, n_bootstrap)
+        comparison_data.append({
+            "space": "Projected y(t)",
+            "metric": "Speed (PCA 2D)",
+            "cohens_d": d,
+            "ci_low": bs.ci_low,
+            "ci_high": bs.ci_high,
+        })
+
+    # Other intrinsic metrics
+    for metric_name, label in [
+        ("tortuosity", "Tortuosity"),
+        ("explored_variance", "Explored Var."),
+    ]:
+        ref_vals = np.array([getattr(m, metric_name) for m in intrinsic_metrics_by_group[ref_group]])
+        comp_vals = np.array([getattr(m, metric_name) for m in intrinsic_metrics_by_group[comp_group]])
+
+        ref_vals = ref_vals[np.isfinite(ref_vals)]
+        comp_vals = comp_vals[np.isfinite(comp_vals)]
+
+        if len(ref_vals) >= 3 and len(comp_vals) >= 3:
+            d = cohens_d(ref_vals, comp_vals)
+            bs = bootstrap_effect_size(ref_vals, comp_vals, n_bootstrap)
+            comparison_data.append({
+                "space": "Intrinsic h(t)",
+                "metric": label,
+                "cohens_d": d,
+                "ci_low": bs.ci_low,
+                "ci_high": bs.ci_high,
+            })
+
+    # Plot
+    fig, ax = plt.subplots(figsize=(10, 6))
+
+    y_positions = np.arange(len(comparison_data))
+    colors = ['#2ecc71' if d['space'] == 'Intrinsic h(t)' else '#3498db'
+              for d in comparison_data]
+
+    # Plot effect sizes with CIs
+    for i, d in enumerate(comparison_data):
+        ax.barh(i, d['cohens_d'], color=colors[i], alpha=0.7, edgecolor='black')
+        ax.errorbar(d['cohens_d'], i,
+                   xerr=[[d['cohens_d'] - d['ci_low']], [d['ci_high'] - d['cohens_d']]],
+                   fmt='none', color='black', capsize=5, linewidth=2)
+
+    # Add labels
+    labels = [f"{d['metric']}\n({d['space'].split()[0]})" for d in comparison_data]
+    ax.set_yticks(y_positions)
+    ax.set_yticklabels(labels)
+    ax.set_xlabel("Cohen's d (effect size)", fontsize=12)
+    ax.axvline(0, color='gray', linestyle='--', linewidth=1)
+
+    # Add legend
+    from matplotlib.patches import Patch
+    legend_elements = [
+        Patch(facecolor='#2ecc71', alpha=0.7, edgecolor='black', label='Intrinsic h(t) - 64D'),
+        Patch(facecolor='#3498db', alpha=0.7, edgecolor='black', label='Projected y(t) - 2D PCA'),
+    ]
+    ax.legend(handles=legend_elements, loc='lower right')
+
+    ax.set_title(f"Intrinsic vs Projected Metrics: {ref_group} vs {comp_group}\n"
+                 f"(Intrinsic metrics are coordinate-invariant)", fontsize=12, fontweight='bold')
+
+    plt.tight_layout()
+
+    # Save
+    save_path = output_dir / "intrinsic_vs_projected_comparison.png"
+    fig.savefig(save_path, dpi=150, bbox_inches="tight")
+    print(f"  Saved: {save_path}")
+
+    if show_plot:
+        plt.show()
+    else:
+        plt.close(fig)
+
+    # Print summary table
+    print("\n  " + "=" * 70)
+    print("  INTRINSIC vs PROJECTED METRICS COMPARISON")
+    print("  " + "=" * 70)
+    print(f"  {'Space':<18} {'Metric':<20} {'Cohen d':>10} {'95% CI':>20}")
+    print("  " + "-" * 70)
+    for d in comparison_data:
+        ci_str = f"[{d['ci_low']:.2f}, {d['ci_high']:.2f}]"
+        print(f"  {d['space']:<18} {d['metric']:<20} {d['cohens_d']:>10.2f} {ci_str:>20}")
+    print("  " + "=" * 70)
+
+    # Check sign consistency
+    intrinsic_speeds = [d for d in comparison_data if 'Speed' in d['metric'] and d['space'] == 'Intrinsic h(t)']
+    projected_speeds = [d for d in comparison_data if 'Speed' in d['metric'] and d['space'] == 'Projected y(t)']
+
+    if intrinsic_speeds and projected_speeds:
+        intrinsic_sign = np.sign(np.mean([d['cohens_d'] for d in intrinsic_speeds]))
+        projected_sign = np.sign(projected_speeds[0]['cohens_d'])
+
+        if intrinsic_sign == projected_sign:
+            print("\n  ✓ SIGN CONSISTENCY: Intrinsic and projected speed effects have same direction")
+        else:
+            print("\n  ✗ WARNING: Intrinsic and projected speed effects have opposite directions")
 
 
 # =============================================================================
@@ -2349,6 +2601,50 @@ def run_full_analysis(
     for group_subjects in subject_data.values():
         all_subjects.extend(group_subjects)
     all_trajectories = [s.trajectory for s in all_subjects]
+
+    # ==========================================================================
+    # INTRINSIC METRICS IN FULL LATENT h(t) - Coordinate-Invariant
+    # ==========================================================================
+    print(f"\n{'='*80}")
+    print("COMPUTING INTRINSIC METRICS IN FULL LATENT SPACE h(t)")
+    print("(These metrics are coordinate-invariant and don't depend on 2D projection)")
+    print(f"{'='*80}")
+
+    # Compute normalization parameters from pooled data
+    print("\nComputing whitening transform from pooled trajectories...")
+    norm_params = compute_pooled_normalization(all_trajectories)
+    latent_dim = all_trajectories[0].shape[1]
+    print(f"  Latent dimension: {latent_dim}")
+    print(f"  Pooled samples: {sum(t.shape[0] for t in all_trajectories):,}")
+
+    # Compute intrinsic metrics for each subject
+    intrinsic_metrics_by_group = {g: [] for g in subject_data.keys()}
+    velocity_config = VELOCITY_CONFIG if VELOCITY_CONFIG else VelocityConfig(
+        method="savgol", savgol_window=5, savgol_poly=2
+    )
+
+    print("\nComputing intrinsic metrics per subject...")
+    for group, subjects in subject_data.items():
+        for subject in subjects:
+            metrics = compute_intrinsic_metrics(
+                subject.trajectory,
+                whitening_matrix=norm_params['whitening_matrix'],
+                dim_stds=norm_params['dim_stds'],
+                velocity_config=velocity_config,
+            )
+            intrinsic_metrics_by_group[group].append(metrics)
+
+    # Compute group means and effect sizes for intrinsic metrics
+    intrinsic_results = compute_intrinsic_group_comparison(
+        intrinsic_metrics_by_group, subject_data, n_bootstrap
+    )
+    results["intrinsic_metrics"] = intrinsic_results
+
+    # Plot and save intrinsic vs projected comparison
+    plot_intrinsic_vs_projected_comparison(
+        intrinsic_metrics_by_group, subject_data, all_trajectories,
+        output_dir, n_bootstrap, show_plot
+    )
 
     for method in methods:
         print(f"\n{'='*80}")

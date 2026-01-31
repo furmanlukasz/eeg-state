@@ -383,3 +383,257 @@ def _config_to_name(config_dict: dict) -> str:
         window = config_dict.get("savgol_window", 5)
         return f"savgol_w{window}"
     return str(config_dict)
+
+
+# =============================================================================
+# INTRINSIC LATENT METRICS (Coordinate-Invariant)
+# =============================================================================
+
+def compute_whitening_transform(trajectories: list[np.ndarray]) -> tuple[np.ndarray, np.ndarray]:
+    """
+    Compute whitening transform from pooled trajectories.
+
+    This computes the global covariance and its inverse square root,
+    which can be used to compute Mahalanobis distances that are
+    invariant to linear rescaling of latent dimensions.
+
+    Args:
+        trajectories: List of (T_i, D) trajectory arrays
+
+    Returns:
+        mean: (D,) mean vector
+        whitening_matrix: (D, D) matrix W such that W @ (h - mean) is whitened
+    """
+    # Pool all points
+    pooled = np.vstack(trajectories)
+    mean = pooled.mean(axis=0)
+
+    # Compute covariance
+    centered = pooled - mean
+    cov = (centered.T @ centered) / (len(pooled) - 1)
+
+    # Compute whitening matrix: W = Σ^{-1/2}
+    # Use eigendecomposition for numerical stability
+    eigenvalues, eigenvectors = np.linalg.eigh(cov)
+
+    # Clip small eigenvalues to avoid numerical issues
+    eigenvalues = np.maximum(eigenvalues, 1e-10)
+
+    # W = V @ diag(1/sqrt(λ)) @ V.T
+    whitening_matrix = eigenvectors @ np.diag(1.0 / np.sqrt(eigenvalues)) @ eigenvectors.T
+
+    return mean, whitening_matrix
+
+
+def compute_whitened_speed(
+    trajectory: np.ndarray,
+    whitening_matrix: np.ndarray,
+    method: Literal["finite_diff", "savgol"] = "savgol",
+    delta_t: int = 1,
+    savgol_window: int = 5,
+    savgol_poly: int = 2,
+    config: VelocityConfig | None = None,
+) -> np.ndarray:
+    """
+    Compute speed using Mahalanobis metric (whitened coordinates).
+
+    This makes speed invariant to linear rescaling of latent dimensions,
+    addressing the "arbitrary units" critique.
+
+    Args:
+        trajectory: (T, D) array of trajectory points in original latent space
+        whitening_matrix: (D, D) whitening transform from compute_whitening_transform()
+        method: Velocity estimation method
+        delta_t: Step size for finite differences
+        savgol_window: Window for Savitzky-Golay
+        savgol_poly: Polynomial order for Savitzky-Golay
+        config: Optional VelocityConfig
+
+    Returns:
+        speed: (T',) array of whitened speeds
+    """
+    # Compute velocity in original space
+    velocity = compute_velocity(
+        trajectory,
+        method=method,
+        delta_t=delta_t,
+        savgol_window=savgol_window,
+        savgol_poly=savgol_poly,
+        config=config,
+    )
+
+    # Transform velocity to whitened space and compute magnitude
+    # ||W @ v|| = sqrt(v.T @ W.T @ W @ v) = sqrt(v.T @ Σ^{-1} @ v) = Mahalanobis
+    whitened_velocity = velocity @ whitening_matrix.T
+    return np.linalg.norm(whitened_velocity, axis=1)
+
+
+def compute_zscored_speed(
+    trajectory: np.ndarray,
+    dim_stds: np.ndarray,
+    method: Literal["finite_diff", "savgol"] = "savgol",
+    delta_t: int = 1,
+    savgol_window: int = 5,
+    savgol_poly: int = 2,
+    config: VelocityConfig | None = None,
+) -> np.ndarray:
+    """
+    Compute speed after z-scoring each latent dimension.
+
+    Simpler alternative to full Mahalanobis: just normalize each dimension
+    by its standard deviation. This removes the "arbitrary scale" critique
+    while being more robust than full covariance inversion.
+
+    Args:
+        trajectory: (T, D) array of trajectory points
+        dim_stds: (D,) standard deviation of each dimension (from pooled data)
+        method: Velocity estimation method
+        delta_t: Step size for finite differences
+        savgol_window: Window for Savitzky-Golay
+        savgol_poly: Polynomial order for Savitzky-Golay
+        config: Optional VelocityConfig
+
+    Returns:
+        speed: (T',) array of z-scored speeds
+    """
+    # Compute velocity in original space
+    velocity = compute_velocity(
+        trajectory,
+        method=method,
+        delta_t=delta_t,
+        savgol_window=savgol_window,
+        savgol_poly=savgol_poly,
+        config=config,
+    )
+
+    # Normalize each dimension by its std
+    dim_stds = np.maximum(dim_stds, 1e-10)  # Avoid division by zero
+    normalized_velocity = velocity / dim_stds
+
+    return np.linalg.norm(normalized_velocity, axis=1)
+
+
+@dataclass
+class IntrinsicMetrics:
+    """Intrinsic (coordinate-invariant) metrics computed in full latent h(t).
+
+    These metrics do not depend on a specific 2D projection and are
+    invariant to linear rescaling of latent dimensions when using
+    whitened/z-scored distances.
+    """
+    mean_speed: float           # Mean speed (Euclidean in latent)
+    mean_speed_whitened: float  # Mean speed (Mahalanobis / whitened)
+    mean_speed_zscored: float   # Mean speed (z-scored dimensions)
+    speed_std: float            # Speed variability
+    speed_cv: float             # Coefficient of variation
+    path_length: float          # Total path length
+    displacement: float         # End-to-end displacement
+    tortuosity: float           # path_length / displacement
+    explored_variance: float    # trace(Cov(h)) = sum of per-dim variances
+    latent_dim: int             # Dimensionality of latent space
+
+
+def compute_intrinsic_metrics(
+    trajectory: np.ndarray,
+    whitening_matrix: np.ndarray | None = None,
+    dim_stds: np.ndarray | None = None,
+    velocity_config: VelocityConfig | None = None,
+) -> IntrinsicMetrics:
+    """
+    Compute intrinsic metrics in full latent space h(t).
+
+    These are the "coordinate-free" metrics that don't depend on
+    a specific 2D projection. Speed is computed using:
+    - Euclidean (raw)
+    - Mahalanobis (whitened) - invariant to linear rescaling
+    - Z-scored - simpler alternative
+
+    Args:
+        trajectory: (T, D) latent trajectory in full h(t) space
+        whitening_matrix: (D, D) from compute_whitening_transform()
+        dim_stds: (D,) per-dimension stds for z-scoring
+        velocity_config: Optional velocity estimation config
+
+    Returns:
+        IntrinsicMetrics dataclass with all computed metrics
+    """
+    if velocity_config is None:
+        velocity_config = VelocityConfig(method="savgol", savgol_window=5, savgol_poly=2)
+
+    trajectory = np.asarray(trajectory)
+    T, D = trajectory.shape
+
+    # Euclidean speed
+    speed_euclidean = compute_speed(trajectory, config=velocity_config)
+    mean_speed = float(np.mean(speed_euclidean))
+    speed_std = float(np.std(speed_euclidean))
+    speed_cv = speed_std / mean_speed if mean_speed > 0 else 0.0
+
+    # Whitened speed (Mahalanobis)
+    if whitening_matrix is not None:
+        speed_whitened = compute_whitened_speed(
+            trajectory, whitening_matrix, config=velocity_config
+        )
+        mean_speed_whitened = float(np.mean(speed_whitened))
+    else:
+        mean_speed_whitened = mean_speed  # Fallback to Euclidean
+
+    # Z-scored speed
+    if dim_stds is not None:
+        speed_zscored = compute_zscored_speed(
+            trajectory, dim_stds, config=velocity_config
+        )
+        mean_speed_zscored = float(np.mean(speed_zscored))
+    else:
+        mean_speed_zscored = mean_speed  # Fallback to Euclidean
+
+    # Path geometry
+    path_length = float(np.sum(speed_euclidean))
+    displacement = float(np.linalg.norm(trajectory[-1] - trajectory[0]))
+    tortuosity = path_length / displacement if displacement > 0 else float('inf')
+
+    # Explored variance: trace of covariance = sum of per-dim variances
+    explored_variance = float(np.var(trajectory, axis=0).sum())
+
+    return IntrinsicMetrics(
+        mean_speed=mean_speed,
+        mean_speed_whitened=mean_speed_whitened,
+        mean_speed_zscored=mean_speed_zscored,
+        speed_std=speed_std,
+        speed_cv=speed_cv,
+        path_length=path_length,
+        displacement=displacement,
+        tortuosity=tortuosity,
+        explored_variance=explored_variance,
+        latent_dim=D,
+    )
+
+
+def compute_pooled_normalization(trajectories: list[np.ndarray]) -> dict:
+    """
+    Compute normalization parameters from pooled trajectories.
+
+    Returns both whitening matrix and per-dimension stds for
+    different normalization strategies.
+
+    Args:
+        trajectories: List of (T_i, D) trajectory arrays
+
+    Returns:
+        Dict with:
+            - 'mean': (D,) mean vector
+            - 'whitening_matrix': (D, D) for Mahalanobis
+            - 'dim_stds': (D,) per-dimension stds for z-scoring
+    """
+    pooled = np.vstack(trajectories)
+    mean = pooled.mean(axis=0)
+    dim_stds = pooled.std(axis=0)
+
+    # Compute whitening matrix
+    _, whitening_matrix = compute_whitening_transform(trajectories)
+
+    return {
+        'mean': mean,
+        'whitening_matrix': whitening_matrix,
+        'dim_stds': dim_stds,
+    }

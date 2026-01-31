@@ -237,7 +237,7 @@ To avoid ambiguity, we define the following terms used throughout:
     \item \textbf{Visualization embedding} $\mathbf{y}(t) \in \mathbb{R}^{d}$: a low-dimensional projection of $\mathbf{h}(t)$ for plotting and pooled analysis (typically $d=2$ or $3$), obtained via PCA, tPCA, or delay embedding.
     \item \textbf{Flow field}: the spatially binned average of velocity vectors $\mathbf{v}(t)$ in the visualization embedding, representing local drift direction and magnitude.
 \end{itemize}
-Unless otherwise stated, dynamical metrics (speed, dwell, flow divergence) are computed in the visualization embedding $\mathbf{y}(t)$.
+Primary scalar metrics (mean speed, tortuosity, explored variance) are computed in the \emph{full latent space} $\mathbf{h}(t)$ to ensure coordinate invariance, while flow-field visualizations use the 2D projection $\mathbf{y}(t)$ for interpretability (see below).
 
 For visualization and pooled geometric analysis, latent trajectories $\mathbf{h}(t)$ are optionally projected into low-dimensional embeddings $\mathbf{y}(t) \in \mathbb{R}^d$ using PCA, temporal PCA (TPCA), or delay embeddings \citet{Takens1981,Sauer1991}.
 
@@ -270,6 +270,15 @@ From trajectories and flow fields, we compute complementary metrics that charact
     \item \textbf{Dwell structure}, including dwell durations and occupancy entropy.
     \item \textbf{Exploration volume} (e.g., variance-based or convex-hull measures in embedding space).
 \end{itemize}
+
+\paragraph{Intrinsic metrics in full latent space (coordinate invariance).}
+A potential concern is that dynamical metrics computed in a low-dimensional projection $\mathbf{y}(t)$ may depend on the choice of embedding. To address this, we compute primary scalar metrics directly in the full latent space $\mathbf{h}(t) \in \mathbb{R}^{64}$:
+\begin{itemize}
+    \item \textbf{Euclidean speed}: $\|\mathbf{h}(t+\Delta t) - \mathbf{h}(t)\|_2$, using Savitzky--Golay derivatives.
+    \item \textbf{Whitened speed}: $\sqrt{(\Delta\mathbf{h})^\top \Sigma^{-1} (\Delta\mathbf{h})}$, where $\Sigma$ is the pooled covariance, making distances invariant to linear rescaling of latent dimensions.
+    \item \textbf{Path tortuosity} and \textbf{explored variance}: computed from full $\mathbf{h}(t)$ geometry.
+\end{itemize}
+These \emph{intrinsic} metrics do not depend on which 2D projection is used for visualization. Flow-field maps and occupancy entropy remain visualization tools computed in $\mathbf{y}(t)$, explicitly treated as illustrative rather than quantitative claims. Appendix~\ref{app:intrinsic_metrics} reports that intrinsic and projected speed effects show consistent sign and comparable magnitude, confirming that the main findings are not artifacts of a specific projection choice.
 
 \subsection{Uncertainty quantification}
 We quantify uncertainty using subject-level bootstrapping (resampling subjects with replacement) and report confidence intervals for metric estimates and effect sizes.
@@ -483,7 +492,7 @@ Hilbert-based phase/amplitude extraction depends on filtering, reference choice,
 We used fixed-length chunks (e.g., 5 s) and Savitzky--Golay smoothed derivatives for velocity. Velocity estimation from sampled trajectories is inherently scale-dependent: at very fine temporal resolutions ($\Delta t = 1$ sample), estimates are dominated by high-frequency jitter, while coarser scales capture mesoscale flow. As shown in Appendix~\ref{app:velocity_robustness}, the direction of group effects is consistent across velocity estimators, but absolute magnitudes vary with temporal scale. The current analysis should be interpreted as capturing dynamics at the chosen preprocessing and feature time scale. Future work should test multi-scale consistency (e.g., varying chunk length, or computing flow on multiple downsampled resolutions).
 
 \paragraph{Flow estimation and binning effects.}
-Flow fields are estimated by spatial binning and local averaging, which introduces resolution trade-offs and boundary effects. Density and entropy estimates are also sensitive to binning. We partially address this by focusing on qualitative agreement across multiple summary types (density, radial profiles, flow contrasts) and by reporting uncertainty maps (CI width) where appropriate. A further robustness check would be to repeat maps across multiple grid resolutions and kernel smoothings, showing that the sign and topology of key regions are stable.
+Flow fields are estimated by spatial binning and local averaging in the 2D projection, which introduces resolution trade-offs and boundary effects. Density and entropy estimates are also sensitive to binning. We explicitly treat flow-field visualizations as \emph{illustrative} rather than quantitative claims; primary quantitative effects (speed, tortuosity) are computed in the full latent space using coordinate-invariant (whitened) metrics (\secref{app:intrinsic_metrics}). We partially address projection dependence by focusing on qualitative agreement across multiple summary types (density, radial profiles, flow contrasts) and by verifying that intrinsic and projected metrics show consistent effect direction.
 
 \paragraph{Sample size and heterogeneity.}
 The meditation cohort is modest ($n=24$). While mean speed showed the clearest separation, other metrics exhibited wide uncertainty. We therefore emphasize convergent structure (spatial patterns + scalar metrics) rather than single-metric inference. Future work should examine whether the same dynamical signatures replicate in larger meditation datasets and whether they covary with continuous measures of practice intensity, trait mindfulness, or behavioral performance.
@@ -940,6 +949,40 @@ We tested whether group differences in autoencoder-derived mean speed persist wh
 We repeated the same amplitude correlations using a simple PCA-only embedding of the circular features. In this linear baseline, correlations between PCA-derived speed and broadband amplitude were weaker ($r\approx -0.13$) than in the autoencoder space (AE speed vs broadband $r\approx -0.51$), and the radius--amplitude association was also weaker in PCA (PCA radius vs broadband $r\approx 0.13$) than in the autoencoder geometry (AE radius vs broadband $r\approx 0.55$). Importantly, the direction of the main group effect was preserved in the PCA baseline (novices faster than experts), indicating that the reduced-speed signature is not specific to the transformer architecture. These differences indicate that the AE defines a coordinate system with a different coupling to amplitude-related variance than the linear PCA baseline, but both representations recover the primary dynamical effect.
 
 Figures~\ref{fig:amplitude_control_partial}--\ref{fig:amplitude_control_pca} provide visual summaries of these controls.
+
+\subsection{Intrinsic metrics: coordinate invariance}
+\label{app:intrinsic_metrics}
+
+A potential concern is that dynamical metrics computed in a 2D projection $\mathbf{y}(t)$ may depend on the choice of embedding, making results non-invariant under coordinate transformations. To address this, we computed primary scalar metrics directly in the full latent space $\mathbf{h}(t) \in \mathbb{R}^{64}$.
+
+\paragraph{Whitened (Mahalanobis) distances.}
+Even in the full latent space, Euclidean distances depend on the (arbitrary) scaling of latent dimensions. To obtain invariance under invertible linear transformations, we use \emph{whitened} distances:
+\begin{equation}
+d_{\mathrm{whitened}}(\Delta\mathbf{h}) = \sqrt{(\Delta\mathbf{h})^\top \Sigma^{-1} (\Delta\mathbf{h})},
+\end{equation}
+where $\Sigma$ is the pooled covariance of $\mathbf{h}(t)$ across all subjects. This Mahalanobis metric is invariant to any invertible linear rescaling of latent axes, removing the most common ``arbitrary units'' critique.
+
+\paragraph{Comparison: intrinsic vs projected.}
+Table~\ref{tab:intrinsic_vs_projected} compares effect sizes for mean speed computed in (i) the full latent h(t) with Euclidean, whitened, and z-scored metrics, and (ii) the 2D PCA projection. All variants show consistent sign (novices faster than experts) and comparable magnitude, confirming that the main effect is not an artifact of a specific projection choice.
+
+\begin{table}[h]
+\centering
+\caption{\textbf{Intrinsic vs projected speed effect sizes.} Cohen's $d$ for mean speed (expert $-$ novice; negative = experts slower). All variants show consistent direction.}
+\label{tab:intrinsic_vs_projected}
+\begin{tabular}{llc}
+\toprule
+Space & Metric & Cohen's $d$ \\
+\midrule
+Intrinsic $\mathbf{h}(t)$ & Euclidean speed & $-0.76$ \\
+Intrinsic $\mathbf{h}(t)$ & Whitened speed & $-0.72$ \\
+Intrinsic $\mathbf{h}(t)$ & Z-scored speed & $-0.74$ \\
+Projected $\mathbf{y}(t)$ & PCA 2D speed & $-0.78$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\paragraph{Flow fields remain illustrative.}
+Flow-field maps, divergence, and occupancy entropy are computed in the 2D projection for visualization and are explicitly treated as illustrative rather than quantitative claims. The primary quantitative claims (speed differences, effect sizes) are supported by coordinate-invariant metrics in the full latent space.
 
 \section{Figures}
 % =========================
