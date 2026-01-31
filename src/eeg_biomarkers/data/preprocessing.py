@@ -192,6 +192,168 @@ def chunk_signal(
     return chunks, mask
 
 
+# Default filterbank bands for narrowband ablation
+# Based on canonical EEG frequency bands
+DEFAULT_FILTERBANK = {
+    "delta": (1.0, 4.0),
+    "theta": (4.0, 8.0),
+    "alpha": (8.0, 13.0),
+    "beta": (13.0, 30.0),
+    "low_gamma": (30.0, 48.0),
+}
+
+
+def extract_phase_filterbank(
+    raw: mne.io.Raw,
+    bands: dict[str, tuple[float, float]] | None = None,
+    include_amplitude: bool = False,
+    normalize_amplitude: bool = True,
+    verbose: bool = False,
+) -> tuple[np.ndarray, dict]:
+    """
+    Extract phase (and optionally amplitude) from multiple narrowband filters.
+
+    This is an alternative to broadband Hilbert that provides more interpretable
+    phase estimates for each canonical frequency band. Use this for narrowband
+    ablation studies to address "broadband Hilbert interpretability" concerns.
+
+    Args:
+        raw: Preprocessed MNE Raw object (already filtered to remove artifacts)
+        bands: Dictionary mapping band names to (low, high) frequency tuples.
+               Default: delta (1-4), theta (4-8), alpha (8-13), beta (13-30), low_gamma (30-48)
+        include_amplitude: Whether to include log-amplitude for each band
+        normalize_amplitude: Whether to z-score normalize log-amplitude per channel/band
+        verbose: Whether to print progress
+
+    Returns:
+        features: Array (n_channels * n_bands * phase_channels, n_samples)
+                  where phase_channels = 2 (cos, sin) or 3 (cos, sin, log_amp)
+        info: Dictionary with metadata including band names and structure
+    """
+    from scipy.signal import butter, filtfilt
+
+    if bands is None:
+        bands = DEFAULT_FILTERBANK
+
+    data = raw.get_data()  # (n_channels, n_samples)
+    n_channels, n_samples = data.shape
+    sfreq = raw.info["sfreq"]
+    nyq = sfreq / 2.0
+
+    n_bands = len(bands)
+    phase_channels = 3 if include_amplitude else 2
+    band_names = list(bands.keys())
+
+    # Pre-allocate output: (n_channels, n_bands, phase_channels, n_samples)
+    all_features = np.zeros((n_channels, n_bands, phase_channels, n_samples), dtype=np.float32)
+
+    for band_idx, (band_name, (low, high)) in enumerate(bands.items()):
+        if verbose:
+            print(f"  Processing band {band_name}: {low}-{high} Hz")
+
+        # Bandpass filter
+        low_norm = low / nyq
+        high_norm = high / nyq
+        # Handle edge case where high frequency is close to Nyquist
+        high_norm = min(high_norm, 0.99)
+        b, a = butter(4, [low_norm, high_norm], btype="band")
+        filtered = filtfilt(b, a, data, axis=1)
+
+        # Hilbert transform for this band
+        analytic = hilbert(filtered, axis=1)
+        phase = np.angle(analytic)
+
+        # Circular representation
+        cos_phase = np.cos(phase)
+        sin_phase = np.sin(phase)
+
+        all_features[:, band_idx, 0, :] = cos_phase
+        all_features[:, band_idx, 1, :] = sin_phase
+
+        if include_amplitude:
+            amplitude = np.abs(analytic)
+            log_amplitude = np.log(amplitude + 1e-8)
+
+            if normalize_amplitude:
+                # Z-score per channel
+                mean_amp = log_amplitude.mean(axis=1, keepdims=True)
+                std_amp = log_amplitude.std(axis=1, keepdims=True) + 1e-8
+                log_amplitude = (log_amplitude - mean_amp) / std_amp
+
+            all_features[:, band_idx, 2, :] = log_amplitude
+
+    # Reshape to (n_channels * n_bands * phase_channels, n_samples)
+    features = all_features.reshape(n_channels * n_bands * phase_channels, n_samples)
+
+    info = {
+        "n_channels": n_channels,
+        "n_bands": n_bands,
+        "band_names": band_names,
+        "bands": bands,
+        "phase_channels": phase_channels,
+        "include_amplitude": include_amplitude,
+        "feature_dim": n_channels * n_bands * phase_channels,
+    }
+
+    return features, info
+
+
+def prepare_phase_chunks_filterbank(
+    raw: mne.io.Raw,
+    chunk_duration: float = 5.0,
+    chunk_overlap: float = 0.0,
+    bands: dict[str, tuple[float, float]] | None = None,
+    include_amplitude: bool = False,
+    verbose: bool = False,
+) -> tuple[np.ndarray, np.ndarray, dict]:
+    """
+    Prepare EEG data as filterbank phase chunks for model input.
+
+    This is the narrowband version of prepare_phase_chunks(), extracting
+    phase/amplitude from multiple canonical frequency bands.
+
+    Args:
+        raw: Preprocessed MNE Raw object
+        chunk_duration: Duration of each chunk in seconds
+        chunk_overlap: Overlap between chunks in seconds
+        bands: Dictionary mapping band names to (low, high) frequency tuples
+        include_amplitude: Whether to include amplitude channel per band
+        verbose: Whether to print progress
+
+    Returns:
+        chunks: Phase chunks (n_chunks, n_channels * n_bands * phase_channels, chunk_samples)
+        mask: Validity mask (n_chunks, chunk_samples)
+        info: Dictionary with metadata
+    """
+    sfreq = raw.info["sfreq"]
+    chunk_samples = int(chunk_duration * sfreq)
+    overlap_samples = int(chunk_overlap * sfreq)
+
+    # Extract filterbank phase features
+    features, fb_info = extract_phase_filterbank(
+        raw,
+        bands=bands,
+        include_amplitude=include_amplitude,
+        verbose=verbose,
+    )
+
+    # Chunk the data
+    chunks, mask = chunk_signal(features, chunk_samples, overlap_samples)
+    # Shape: (feature_dim, n_chunks, chunk_samples)
+
+    # Transpose to (n_chunks, feature_dim, chunk_samples)
+    chunks = np.transpose(chunks, (1, 0, 2))
+
+    info = {
+        **fb_info,
+        "sfreq": sfreq,
+        "chunk_duration": chunk_duration,
+        "chunk_samples": chunk_samples,
+    }
+
+    return chunks, mask, info
+
+
 def prepare_phase_chunks(
     raw: mne.io.Raw,
     chunk_duration: float = 5.0,

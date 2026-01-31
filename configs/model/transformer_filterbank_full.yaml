@@ -1,0 +1,45 @@
+# Transformer model configuration - FILTERBANK WITH AMPLITUDE
+# Ablation B: Narrowband phase + amplitude features for each canonical band
+# Addresses "broadband Hilbert" critique while keeping amplitude to compare with phase-only
+#
+# Bands: delta (1-4), theta (4-8), alpha (8-13), beta (13-30), low_gamma (30-48)
+# Features per channel: 5 bands × 3 (cos, sin, log_amp) = 15 features
+# Total features: n_channels × 15
+#
+# Usage:
+#   python -m eeg_biomarkers.training.train model=transformer_filterbank_full
+#
+name: "transformer_autoencoder"
+
+encoder:
+  complexity: 2
+  hidden_size: 64
+  dropout: 0.1
+  n_heads: 4
+  n_transformer_layers: 2
+  dim_feedforward: 384
+
+decoder:
+  use_encoder_config: true
+  constrain_output: true
+
+recurrence:
+  threshold_method: "rr_controlled"
+  target_rr: 0.02
+  fixed_epsilon: null
+
+# Phase representation - FILTERBANK WITH AMPLITUDE
+phase:
+  representation: "filterbank"  # Use narrowband filterbank
+  include_amplitude: true       # Include amplitude per band
+  normalize_amplitude: true     # Z-score to prevent amplitude dominating loss
+
+# Filterbank configuration
+filterbank:
+  enabled: true
+  bands:
+    delta: [1.0, 4.0]
+    theta: [4.0, 8.0]
+    alpha: [8.0, 13.0]
+    beta: [13.0, 30.0]
+    low_gamma: [30.0, 48.0]

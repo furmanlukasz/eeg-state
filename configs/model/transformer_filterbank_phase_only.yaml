@@ -1,0 +1,45 @@
+# Transformer model configuration - FILTERBANK PHASE ONLY
+# Ablation A: Narrowband phase features (cos φ, sin φ) for each canonical band
+# No amplitude - addresses both "broadband Hilbert" and "amplitude proxy" critiques
+#
+# Bands: delta (1-4), theta (4-8), alpha (8-13), beta (13-30), low_gamma (30-48)
+# Features per channel: 5 bands × 2 (cos, sin) = 10 features
+# Total features: n_channels × 10
+#
+# Usage:
+#   python -m eeg_biomarkers.training.train model=transformer_filterbank_phase_only
+#
+name: "transformer_autoencoder"
+
+encoder:
+  complexity: 2
+  hidden_size: 64
+  dropout: 0.1
+  n_heads: 4
+  n_transformer_layers: 2
+  dim_feedforward: 384
+
+decoder:
+  use_encoder_config: true
+  constrain_output: true  # Apply tanh to cos/sin outputs
+
+recurrence:
+  threshold_method: "rr_controlled"
+  target_rr: 0.02
+  fixed_epsilon: null
+
+# Phase representation - FILTERBANK PHASE ONLY
+phase:
+  representation: "filterbank"  # Use narrowband filterbank instead of broadband
+  include_amplitude: false      # NO AMPLITUDE - phase only
+  normalize_amplitude: false
+
+# Filterbank configuration
+filterbank:
+  enabled: true
+  bands:
+    delta: [1.0, 4.0]
+    theta: [4.0, 8.0]
+    alpha: [8.0, 13.0]
+    beta: [13.0, 30.0]
+    low_gamma: [30.0, 48.0]

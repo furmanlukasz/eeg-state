@@ -1,0 +1,122 @@
+# @package _global_
+# Ablation Study B: FILTERBANK WITH AMPLITUDE (narrowband, phase + amplitude)
+#
+# This ablation addresses the "broadband Hilbert" critique while KEEPING amplitude.
+# Compare with ablation_filterbank_phase_only to isolate amplitude's contribution.
+#
+# If effect is STRONGER in phase-only filterbank vs full filterbank,
+# it suggests amplitude actually attenuates the dynamical signature.
+#
+# Features: 5 bands × 3 (cos, sin, log_amp) × 79 channels = 1185 features per timepoint
+#
+# Usage:
+#   python -m eeg_biomarkers.training.train \
+#     --config-name=experiment/ablation_filterbank_full \
+#     paths.data_dir=/path/to/ds001787
+
+defaults:
+  - /model: transformer_filterbank_full
+  - /data: meditation_bids
+  - /training: enhanced
+  - _self_
+
+# Experiment identification
+experiment:
+  name: "ablation_filterbank_full"
+  seed: 42
+  device: "auto"
+
+# Model settings
+model:
+  name: "transformer_autoencoder"
+  encoder:
+    complexity: 2
+    hidden_size: 64
+    dropout: 0.1
+    n_heads: 4
+    n_transformer_layers: 2
+    dim_feedforward: 384
+  decoder:
+    use_encoder_config: true
+    constrain_output: true
+  phase:
+    representation: "filterbank"
+    include_amplitude: true   # KEY: Include amplitude per band
+    normalize_amplitude: true
+  filterbank:
+    enabled: true
+    bands:
+      delta: [1.0, 4.0]
+      theta: [4.0, 8.0]
+      alpha: [8.0, 13.0]
+      beta: [13.0, 30.0]
+      low_gamma: [30.0, 48.0]
+
+# Data preprocessing
+data:
+  dataset: "meditation_bids"
+  preprocessing:
+    filter_low: 1.0
+    filter_high: 50.0
+    notch_freq: 50.0
+    reference: ~
+    chunk_duration: 5.0
+    chunk_overlap: 0.0
+    phase_method: "filterbank"
+
+# Training settings (same as other ablations)
+training:
+  epochs: 300
+  batch_size: 64
+  gradient_clip_norm: 1.0
+
+  early_stopping:
+    enabled: true
+    patience: 30
+    min_delta: 0.001
+
+  checkpointing:
+    enabled: true
+    save_every_n_epochs: 20
+    save_best: true
+    save_last: true
+
+  optimizer:
+    name: "adamw"
+    lr: 0.0005
+    weight_decay: 0.01
+    betas: [0.9, 0.999]
+
+  scheduler:
+    name: "cosine"
+    warmup_epochs: 10
+    min_lr: 0.00001
+
+  # Loss weights
+  loss:
+    name: "mse_contrastive"
+
+  lambda_reconstruction: 1.0
+  lambda_phase: 1.0
+  lambda_amplitude: 0.5  # Include amplitude loss
+  lambda_unit_circle: 0.1
+  lambda_contrastive: 0.0
+  lambda_triplet: 0.0
+  contrastive_temperature: 0.07
+  contrastive_mode: "condition"
+  contrastive_shuffle_labels: false
+
+# Paths
+paths:
+  data_dir: "data/ds001787"
+  output_dir: "${hydra:runtime.cwd}/outputs"
+  model_dir: "${hydra:runtime.output_dir}/checkpoints"
+  results_dir: "${hydra:runtime.output_dir}/results"
+
+# Logging
+logging:
+  level: "INFO"
+  wandb:
+    enabled: true
+    project: "eeg-ablation-study"
+    entity: null
