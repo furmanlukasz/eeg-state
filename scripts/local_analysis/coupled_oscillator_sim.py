@@ -860,6 +860,8 @@ def run_full_analysis(
     seed: int = 42,
     show_plots: bool = False,
     quick: bool = False,
+    n_cycles: int = 1,
+    regime_duration_s: Optional[float] = None,
 ) -> Dict:
     """
     Run full analysis pipeline with coupled Stuart-Landau simulation.
@@ -886,6 +888,10 @@ def run_full_analysis(
         seed: Random seed
         show_plots: Whether to display plots
         quick: Quick mode (fewer epochs)
+        n_cycles: Number of full regime cycles (default 1 = each regime once)
+            Use n_cycles > 1 to test transition tracking (e.g., n_cycles=4 with
+            regime_duration_s=10 gives 10s×4regimes×4cycles = 160s)
+        regime_duration_s: Duration per regime in seconds (default: total_duration_s / 4 / n_cycles)
 
     Returns:
         Dict with all results and statistics
@@ -970,14 +976,25 @@ def run_full_analysis(
     )
     net.default_topologies(seed=seed)
 
-    # Regime schedule: equal time in each topology
-    regime_duration = total_duration_s / 4
-    schedule = [
-        ("global", regime_duration),
-        ("cluster", regime_duration),
-        ("sparse", regime_duration),
-        ("ring", regime_duration),
-    ]
+    # Regime schedule: support multiple cycles for transition tracking
+    # Default: 1 cycle with equal time per regime
+    # With n_cycles > 1: shorter regimes repeated multiple times
+    regime_names_order = ["global", "cluster", "sparse", "ring"]
+    if regime_duration_s is not None:
+        per_regime = regime_duration_s
+    else:
+        per_regime = total_duration_s / (4 * n_cycles)
+
+    schedule = []
+    for _ in range(n_cycles):
+        for name in regime_names_order:
+            schedule.append((name, per_regime))
+
+    # Adjust total duration to match schedule
+    actual_duration = per_regime * 4 * n_cycles
+    if abs(actual_duration - total_duration_s) > 0.1:
+        print(f"  Note: Adjusted duration from {total_duration_s}s to {actual_duration}s for {n_cycles} cycle(s)")
+        total_duration_s = actual_duration
 
     result = net.generate(
         total_duration_s=total_duration_s,
@@ -1167,10 +1184,20 @@ def run_full_analysis(
             "occupancy_entropy": occ_entropy,
         }
 
+    # Get unique regime names (handles multiple cycles)
+    unique_regime_names = list(dict.fromkeys(result.regime_names))  # Preserves order, removes duplicates
+
+    # Create mapping from regime_id to regime_name
+    # regime_id values map to indices in result.regime_names
+    regime_id_to_name = {i: result.regime_names[i] for i in range(len(result.regime_names))}
+
     regime_metrics = {}
     print("\n  Flow metrics per regime (on full latent, hardened tortuosity):")
-    for i, name in enumerate(result.regime_names):
-        mask = labels_aligned == i
+    for name in unique_regime_names:
+        # Find all regime_ids that correspond to this regime name
+        matching_ids = [i for i, n in enumerate(result.regime_names) if n == name]
+        # Combine masks for all occurrences of this regime
+        mask = np.isin(labels_aligned, matching_ids)
         if mask.sum() > 100:
             # Compute on FULL LATENT (not 2D projection) for reliable statistics
             regime_latent = latent_clipped[mask]
@@ -1208,15 +1235,22 @@ def run_full_analysis(
     fig2 = plt.figure(figsize=(16, 12))
     gs = GridSpec(2, 2, figure=fig2, hspace=0.3, wspace=0.25)
 
-    # Panel A: Regime timeline
+    # Panel A: Regime timeline (use ORIGINAL labels, not compressed)
     ax_a = fig2.add_subplot(gs[0, 0])
-    for i in range(len(legacy.time) - 1):
-        if i < len(labels_aligned):
-            regime_idx = labels_aligned[i]
-            regime_name = result.regime_names[regime_idx] if regime_idx < len(result.regime_names) else "unknown"
-            color = regime_colors.get(regime_name, "#888888")
-            ax_a.axvspan(legacy.time[i], legacy.time[i+1], color=color, alpha=0.7)
-    ax_a.set_xlim(legacy.time[0], legacy.time[-1])
+    # Use result.regime_id which has the full time resolution
+    time_full = result.t
+    regime_id_full = result.regime_id
+    # Plot by finding regime boundaries for efficiency (instead of per-sample)
+    regime_changes = np.where(np.diff(regime_id_full) != 0)[0] + 1
+    regime_boundaries = np.concatenate([[0], regime_changes, [len(regime_id_full)]])
+    for k in range(len(regime_boundaries) - 1):
+        start_idx = regime_boundaries[k]
+        end_idx = regime_boundaries[k + 1] - 1
+        regime_idx = regime_id_full[start_idx]
+        regime_name = result.regime_names[regime_idx] if regime_idx < len(result.regime_names) else "unknown"
+        color = regime_colors.get(regime_name, "#888888")
+        ax_a.axvspan(time_full[start_idx], time_full[end_idx], color=color, alpha=0.7)
+    ax_a.set_xlim(time_full[0], time_full[-1])
     ax_a.set_ylim(0, 1)
     ax_a.set_xlabel("Time (s)")
     ax_a.set_title("A) Ground-Truth Regime Sequence", fontweight='bold')
@@ -1229,8 +1263,10 @@ def run_full_analysis(
     step = max(1, len(embedded) // 5000)
     embedded_ds = embedded[::step]
     labels_ds = labels_aligned[::step][:len(embedded_ds)]
-    for i, name in enumerate(result.regime_names):
-        mask = labels_ds == i
+    # Map labels to unique regime names for coloring
+    for name in unique_regime_names:
+        matching_ids = [i for i, n in enumerate(result.regime_names) if n == name]
+        mask = np.isin(labels_ds, matching_ids)
         color = regime_colors.get(name, "#888888")
         ax_b.scatter(embedded_ds[mask, 0], embedded_ds[mask, 1], c=color, s=2, alpha=0.4, label=name)
     ax_b.set_xlabel("Dim 1")
@@ -1255,21 +1291,21 @@ def run_full_analysis(
     ax_c.set_ylabel("Dim 2")
     ax_c.set_title("C) Density + Flow Field", fontweight='bold')
 
-    # Panel D: Metric comparison
+    # Panel D: Metric comparison (use unique regime names)
     ax_d = fig2.add_subplot(gs[1, 1])
-    metric_names = ["mean_speed", "speed_cv", "path_tortuosity", "explored_variance"]
+    metric_names = ["mean_speed", "speed_cv", "median_tortuosity", "explored_variance"]
     metric_labels = ["Speed", "Speed CV", "Tortuosity", "Variance"]
-    x = np.arange(len(result.regime_names))
+    x = np.arange(len(unique_regime_names))
     width = 0.18
     for j, (metric, label) in enumerate(zip(metric_names, metric_labels)):
-        values = [regime_metrics.get(name, {}).get(metric, 0) for name in result.regime_names]
+        values = [regime_metrics.get(name, {}).get(metric, 0) for name in unique_regime_names]
         # Normalize for comparison
         max_val = max(values) if values else 1
         norm_values = [v / max_val if max_val > 0 else 0 for v in values]
         offset = (j - 1.5) * width
         bars = ax_d.bar(x + offset, norm_values, width, label=label, alpha=0.8)
     ax_d.set_xticks(x)
-    ax_d.set_xticklabels(result.regime_names)
+    ax_d.set_xticklabels(unique_regime_names)
     ax_d.set_ylabel("Normalized Value")
     ax_d.set_title("D) Flow Metrics by Regime", fontweight='bold')
     ax_d.legend(loc='upper right')
@@ -1351,6 +1387,8 @@ if __name__ == "__main__":
     parser.add_argument("--output", type=str, default=None, help="Output directory")
     parser.add_argument("--quick", action="store_true", help="Quick mode (fewer epochs)")
     parser.add_argument("--show", action="store_true", help="Show plots")
+    parser.add_argument("--cycles", type=int, default=1, help="Number of regime cycles (default 1)")
+    parser.add_argument("--regime-duration", type=float, default=None, help="Duration per regime (s)")
 
     # Legacy demo mode
     parser.add_argument("--demo", action="store_true", help="Run quick demo only")
@@ -1382,4 +1420,6 @@ if __name__ == "__main__":
             seed=args.seed,
             show_plots=args.show,
             quick=args.quick,
+            n_cycles=args.cycles,
+            regime_duration_s=args.regime_duration,
         )
