@@ -1061,13 +1061,17 @@ def run_full_analysis(
     net.default_topologies(seed=seed)
 
     # Regime schedule: support multiple cycles for transition tracking
-    # Default: 1 cycle with equal time per regime
-    # With n_cycles > 1: shorter regimes repeated multiple times
+    # Default: 5s per regime (rapid switching to test transition detection)
+    # This creates many transitions within the recording, which is more
+    # realistic for testing state discovery methods
     regime_names_order = ["global", "cluster", "sparse", "ring"]
     if regime_duration_s is not None:
         per_regime = regime_duration_s
     else:
-        per_regime = total_duration_s / (4 * n_cycles)
+        # Default to 5s per regime (not dividing by n_cycles)
+        per_regime = 5.0
+        # Calculate how many cycles fit in the total duration
+        n_cycles = int(total_duration_s / (4 * per_regime))
 
     schedule = []
     for _ in range(n_cycles):
@@ -1560,10 +1564,7 @@ def run_full_analysis(
     ax_a.set_xlabel("Time (s)")
     ax_a.set_title("A) Ground-Truth Regime Sequence", fontweight='bold')
     ax_a.set_yticks([])  # No y-axis needed for timeline
-
-    # Legend: one entry per unique regime (not per segment)
-    handles = [plt.Rectangle((0,0),1,1, color=regime_colors[n], alpha=0.7) for n in unique_regime_names]
-    ax_a.legend(handles, unique_regime_names, loc='upper right', ncol=2)
+    # No legend - regime colors are self-explanatory from adjacent panels
 
     # Panel B: Embedded trajectories
     ax_b = fig2.add_subplot(gs[0, 1])
