@@ -1208,6 +1208,78 @@ def run_full_analysis(
                   f"tortuosity={metrics['median_tortuosity']:.2f}, variance={metrics['explored_variance']:.3f}")
 
     # =========================================================================
+    # STEP 5b: Compute Per-Window Metrics for Discriminability Analysis
+    # =========================================================================
+    print("\n  Computing per-window metrics for discriminability analysis...")
+
+    # Compute metrics on sliding windows to get distributions per regime
+    window_size = 50  # ~0.2s at 250Hz after 4x compression
+    window_metrics = {name: {"speed": [], "variance": [], "tortuosity": []} for name in unique_regime_names}
+
+    for name in unique_regime_names:
+        matching_ids = [i for i, n in enumerate(result.regime_names) if n == name]
+        mask = np.isin(labels_aligned, matching_ids)
+        regime_latent = latent_clipped[mask]
+
+        # Compute metrics on non-overlapping windows
+        n_windows = len(regime_latent) // window_size
+        for w in range(n_windows):
+            window = regime_latent[w * window_size : (w + 1) * window_size]
+            if len(window) < window_size:
+                continue
+
+            # Speed: mean step size
+            velocity = np.diff(window, axis=0)
+            speeds = np.linalg.norm(velocity, axis=1)
+            window_metrics[name]["speed"].append(float(np.mean(speeds)))
+
+            # Variance: total variance in window
+            window_metrics[name]["variance"].append(float(np.var(window, axis=0).sum()))
+
+            # Tortuosity: path_length / displacement
+            path_len = speeds.sum()
+            disp = np.linalg.norm(window[-1] - window[0])
+            tort = path_len / (disp + 1e-8)
+            window_metrics[name]["tortuosity"].append(float(tort))
+
+    # Convert to arrays
+    for name in unique_regime_names:
+        for metric in window_metrics[name]:
+            window_metrics[name][metric] = np.array(window_metrics[name][metric])
+
+    # Compute discriminability statistics
+    from scipy.stats import f_oneway, kruskal
+
+    discriminability = {}
+    print("\n  Discriminability analysis (ANOVA + effect size):")
+    for metric in ["speed", "variance", "tortuosity"]:
+        groups = [window_metrics[name][metric] for name in unique_regime_names]
+        # Filter out empty groups
+        groups = [g for g in groups if len(g) > 0]
+
+        if len(groups) >= 2 and all(len(g) > 1 for g in groups):
+            # ANOVA F-statistic
+            f_stat, p_val = f_oneway(*groups)
+
+            # Eta-squared (effect size): SS_between / SS_total
+            all_data = np.concatenate(groups)
+            grand_mean = np.mean(all_data)
+            ss_total = np.sum((all_data - grand_mean) ** 2)
+            ss_between = sum(len(g) * (np.mean(g) - grand_mean) ** 2 for g in groups)
+            eta_sq = ss_between / ss_total if ss_total > 0 else 0
+
+            discriminability[metric] = {
+                "f_statistic": float(f_stat),
+                "p_value": float(p_val),
+                "eta_squared": float(eta_sq),
+                "n_windows": [len(g) for g in groups],
+            }
+
+            # Interpretation of eta-squared: 0.01=small, 0.06=medium, 0.14=large
+            effect_label = "large" if eta_sq > 0.14 else "medium" if eta_sq > 0.06 else "small"
+            print(f"    {metric}: F={f_stat:.1f}, p={p_val:.2e}, η²={eta_sq:.3f} ({effect_label})")
+
+    # =========================================================================
     # STEP 6: Generate Figures
     # =========================================================================
     print("\n" + "-" * 50)
@@ -1315,6 +1387,63 @@ def run_full_analysis(
     fig2.savefig(output_dir / "fig_analysis_main.pdf", dpi=300, bbox_inches="tight")
     print(f"  Saved: fig_analysis_main.png/pdf")
 
+    # Figure 3: Discriminability analysis (violin plots + effect sizes)
+    fig3, axes = plt.subplots(1, 3, figsize=(14, 5))
+    metric_titles = {
+        "speed": "Speed (latent units/step)",
+        "variance": "Explored Variance",
+        "tortuosity": "Path Tortuosity",
+    }
+
+    for ax, metric in zip(axes, ["speed", "variance", "tortuosity"]):
+        # Prepare data for violin plot
+        data_for_plot = []
+        positions = []
+        colors_for_plot = []
+        for i, name in enumerate(unique_regime_names):
+            vals = window_metrics[name][metric]
+            if len(vals) > 0:
+                data_for_plot.append(vals)
+                positions.append(i)
+                colors_for_plot.append(regime_colors.get(name, "#888888"))
+
+        if data_for_plot:
+            # Violin plot
+            parts = ax.violinplot(data_for_plot, positions=positions, showmeans=True, showmedians=True)
+
+            # Color the violins
+            for i, pc in enumerate(parts['bodies']):
+                pc.set_facecolor(colors_for_plot[i])
+                pc.set_alpha(0.7)
+
+            # Style the lines
+            for partname in ['cmeans', 'cmedians', 'cbars', 'cmins', 'cmaxes']:
+                if partname in parts:
+                    parts[partname].set_color('black')
+                    parts[partname].set_linewidth(1)
+
+        ax.set_xticks(range(len(unique_regime_names)))
+        ax.set_xticklabels(unique_regime_names)
+        ax.set_title(metric_titles[metric], fontweight='bold')
+        ax.set_ylabel("Value")
+
+        # Add effect size annotation
+        if metric in discriminability:
+            eta_sq = discriminability[metric]["eta_squared"]
+            f_stat = discriminability[metric]["f_statistic"]
+            p_val = discriminability[metric]["p_value"]
+            effect_label = "large" if eta_sq > 0.14 else "medium" if eta_sq > 0.06 else "small"
+            sig_str = "***" if p_val < 0.001 else "**" if p_val < 0.01 else "*" if p_val < 0.05 else "ns"
+            ax.text(0.02, 0.98, f"η²={eta_sq:.3f} ({effect_label})\nF={f_stat:.1f} {sig_str}",
+                   transform=ax.transAxes, va='top', ha='left', fontsize=9,
+                   bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.8))
+
+    fig3.suptitle("Regime Discriminability: Per-Window Metric Distributions", fontsize=14, fontweight='bold')
+    fig3.tight_layout()
+    fig3.savefig(output_dir / "fig_discriminability.png", dpi=150, bbox_inches="tight")
+    fig3.savefig(output_dir / "fig_discriminability.pdf", dpi=300, bbox_inches="tight")
+    print(f"  Saved: fig_discriminability.png/pdf")
+
     if not show_plots:
         plt.close('all')
     else:
@@ -1331,6 +1460,7 @@ def run_full_analysis(
         "parameters": params,
         "synchrony_stats": sync_stats,
         "regime_metrics": regime_metrics,
+        "discriminability": discriminability,
         "n_samples": int(result.y.shape[1]),
         "n_regimes": len(result.regime_names),
         "regime_names": result.regime_names,
