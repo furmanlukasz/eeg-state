@@ -1538,27 +1538,30 @@ def run_full_analysis(
     fig2 = plt.figure(figsize=(16, 12))
     gs = GridSpec(2, 2, figure=fig2, hspace=0.3, wspace=0.25)
 
-    # Panel A: Regime timeline (use ORIGINAL labels, not compressed)
+    # Panel A: Ground-truth regime timeline
+    # Use ONLY switch_times and regime_names - NOT per-sample regime_id
+    # This ensures alignment with results.json and avoids plotting artifacts
     ax_a = fig2.add_subplot(gs[0, 0])
-    # Use result.regime_id which has the full time resolution
-    time_full = result.t
-    regime_id_full = result.regime_id
-    # Plot by finding regime boundaries for efficiency (instead of per-sample)
-    regime_changes = np.where(np.diff(regime_id_full) != 0)[0] + 1
-    regime_boundaries = np.concatenate([[0], regime_changes, [len(regime_id_full)]])
-    for k in range(len(regime_boundaries) - 1):
-        start_idx = regime_boundaries[k]
-        end_idx = regime_boundaries[k + 1] - 1
-        regime_idx = regime_id_full[start_idx]
-        regime_name = result.regime_names[regime_idx] if regime_idx < len(result.regime_names) else "unknown"
+
+    # Build intervals from switch_times: each regime runs from switch_times[i] to switch_times[i+1]
+    # Note: result.regime_names may have duplicates if n_cycles > 1, so we iterate over schedule
+    switch_times = result.switch_times  # [0.0, 45.0, 90.0, 135.0, ...]
+    regime_name_sequence = result.regime_names  # ['global', 'cluster', 'sparse', 'ring', ...]
+
+    for i, regime_name in enumerate(regime_name_sequence):
+        start_time = switch_times[i]
+        # End time is next switch or total duration
+        end_time = switch_times[i + 1] if i + 1 < len(switch_times) else total_duration_s
         color = regime_colors.get(regime_name, "#888888")
-        ax_a.axvspan(time_full[start_idx], time_full[end_idx], color=color, alpha=0.7)
-    ax_a.set_xlim(time_full[0], time_full[-1])
+        ax_a.axvspan(start_time, end_time, color=color, alpha=0.7)
+
+    ax_a.set_xlim(0, total_duration_s)
     ax_a.set_ylim(0, 1)
     ax_a.set_xlabel("Time (s)")
     ax_a.set_title("A) Ground-Truth Regime Sequence", fontweight='bold')
-    ax_a.set_yticks([])
-    # Use unique regime names for legend (avoid duplicates when using cycles)
+    ax_a.set_yticks([])  # No y-axis needed for timeline
+
+    # Legend: one entry per unique regime (not per segment)
     handles = [plt.Rectangle((0,0),1,1, color=regime_colors[n], alpha=0.7) for n in unique_regime_names]
     ax_a.legend(handles, unique_regime_names, loc='upper right', ncol=2)
 
