@@ -175,6 +175,90 @@ def laplacian_from_adjacency(A: np.ndarray) -> np.ndarray:
     return np.diag(deg) - A
 
 
+def compute_laplacian_spectrum(L: np.ndarray) -> Dict[str, float]:
+    """
+    Compute spectral properties of the graph Laplacian.
+
+    Key properties:
+    - lambda_2 (algebraic connectivity / Fiedler value):
+      Larger = more connected/synchronizable
+    - lambda_max: Largest eigenvalue, affects stability
+    - spectral_gap: lambda_2 / lambda_max, measures synchronization efficiency
+    - spectral_width: std of eigenvalues, measures spectral spread
+
+    For the 4 topologies:
+    - Global: High lambda_2, small spectral gap (all eigenvalues similar)
+    - Cluster: Moderate lambda_2 with gap structure (clusters appear as near-zero eigenvalues)
+    - Sparse: Low lambda_2 (poor connectivity)
+    - Ring: Low lambda_2 but structured spectrum (traveling wave modes)
+
+    Args:
+        L: Graph Laplacian matrix (n x n)
+
+    Returns:
+        Dict with spectral properties
+    """
+    # Compute eigenvalues (Laplacian is symmetric for undirected graphs)
+    # For directed graphs, we use the symmetric part for spectral analysis
+    L_sym = (L + L.T) / 2
+    eigenvalues = np.linalg.eigvalsh(L_sym)
+    eigenvalues = np.sort(np.real(eigenvalues))
+
+    # Remove numerical noise around zero
+    eigenvalues = np.where(np.abs(eigenvalues) < 1e-10, 0, eigenvalues)
+
+    # Lambda_2: algebraic connectivity (second smallest eigenvalue)
+    # First eigenvalue is always 0 for connected graphs
+    lambda_2 = eigenvalues[1] if len(eigenvalues) > 1 else 0.0
+
+    # Lambda_max
+    lambda_max = eigenvalues[-1] if len(eigenvalues) > 0 else 1.0
+
+    # Spectral gap ratio
+    spectral_gap = lambda_2 / lambda_max if lambda_max > 0 else 0.0
+
+    # Spectral width (std of non-zero eigenvalues)
+    nonzero_eigs = eigenvalues[eigenvalues > 1e-10]
+    spectral_width = float(np.std(nonzero_eigs)) if len(nonzero_eigs) > 0 else 0.0
+
+    # Number of near-zero eigenvalues (indicates number of connected components)
+    n_components = int(np.sum(eigenvalues < 1e-10))
+
+    return {
+        "lambda_2": float(lambda_2),
+        "lambda_max": float(lambda_max),
+        "spectral_gap": float(spectral_gap),
+        "spectral_width": float(spectral_width),
+        "n_components": n_components,
+        "eigenvalues": eigenvalues.tolist(),
+    }
+
+
+def analyze_topology_spectra(topologies: Dict[str, np.ndarray],
+                             laplacians: Dict[str, np.ndarray]) -> Dict[str, Dict[str, float]]:
+    """
+    Analyze spectral properties of all registered topologies.
+
+    Args:
+        topologies: Dict mapping name -> adjacency matrix
+        laplacians: Dict mapping name -> Laplacian matrix
+
+    Returns:
+        Dict mapping name -> spectral properties
+    """
+    spectra = {}
+    for name, L in laplacians.items():
+        spectra[name] = compute_laplacian_spectrum(L)
+
+        # Also add basic adjacency stats
+        A = topologies.get(name)
+        if A is not None:
+            spectra[name]["mean_degree"] = float(np.mean(np.sum(A, axis=1)))
+            spectra[name]["density"] = float(np.sum(A) / (A.shape[0] * (A.shape[0] - 1)))
+
+    return spectra
+
+
 # -------------------------
 # Stuart–Landau dynamics
 # -------------------------
@@ -1019,6 +1103,13 @@ def run_full_analysis(
     for name, stats in sync_stats.items():
         print(f"    {name}: R = {stats['mean_R']:.3f} ± {stats['std_R']:.3f}")
 
+    # Compute Laplacian spectral analysis for topology verification
+    print("\n  Laplacian Spectral Analysis (topology verification):")
+    topology_spectra = analyze_topology_spectra(net._topologies, net._laplacians)
+    for name, spec in topology_spectra.items():
+        print(f"    {name}: λ₂={spec['lambda_2']:.4f}, λ_max={spec['lambda_max']:.3f}, "
+              f"gap={spec['spectral_gap']:.4f}, density={spec.get('density', 0):.3f}")
+
     # Convert to legacy format
     legacy = to_legacy_format(result)
 
@@ -1184,6 +1275,114 @@ def run_full_analysis(
             "occupancy_entropy": occ_entropy,
         }
 
+    # Helper: compute field-level metrics (divergence, curl/circulation) on 2D embedded space
+    def compute_field_metrics(embedded_2d: np.ndarray, bounds: tuple, grid_size: int = 15) -> dict:
+        """
+        Compute field-level metrics from the flow field on 2D embedded space.
+
+        Divergence: ∂vx/∂x + ∂vy/∂y
+          - Positive: sources/expansion (exploratory dynamics)
+          - Negative: sinks/contraction (attractor dynamics)
+
+        Curl (2D): ∂vy/∂x - ∂vx/∂y
+          - Non-zero: rotational/circular flow patterns
+          - Useful for detecting oscillatory/cyclic dynamics in latent space
+
+        Args:
+            embedded_2d: (n_samples, 2) embedded trajectory
+            bounds: (x_min, x_max, y_min, y_max) from embedder
+            grid_size: number of grid cells per dimension
+
+        Returns:
+            Dict with divergence and curl statistics
+        """
+        x_min, x_max, y_min, y_max = bounds
+
+        # Create grid
+        x_edges = np.linspace(x_min, x_max, grid_size + 1)
+        y_edges = np.linspace(y_min, y_max, grid_size + 1)
+        dx = (x_max - x_min) / grid_size
+        dy = (y_max - y_min) / grid_size
+
+        # Compute velocity at each point
+        velocity = np.diff(embedded_2d, axis=0)  # (n-1, 2)
+        positions = embedded_2d[:-1]  # (n-1, 2)
+
+        # Bin velocities into grid cells
+        flow_x = np.zeros((grid_size, grid_size))
+        flow_y = np.zeros((grid_size, grid_size))
+        counts = np.zeros((grid_size, grid_size))
+
+        x_idx = np.clip(np.digitize(positions[:, 0], x_edges) - 1, 0, grid_size - 1)
+        y_idx = np.clip(np.digitize(positions[:, 1], y_edges) - 1, 0, grid_size - 1)
+
+        for i in range(len(positions)):
+            xi, yi = x_idx[i], y_idx[i]
+            flow_x[yi, xi] += velocity[i, 0]
+            flow_y[yi, xi] += velocity[i, 1]
+            counts[yi, xi] += 1
+
+        # Average velocities
+        mask = counts > 0
+        flow_x[mask] /= counts[mask]
+        flow_y[mask] /= counts[mask]
+
+        # Compute divergence using finite differences (central)
+        # div = ∂vx/∂x + ∂vy/∂y
+        dvx_dx = np.zeros_like(flow_x)
+        dvy_dy = np.zeros_like(flow_y)
+
+        # Central differences for interior points
+        dvx_dx[:, 1:-1] = (flow_x[:, 2:] - flow_x[:, :-2]) / (2 * dx)
+        dvy_dy[1:-1, :] = (flow_y[2:, :] - flow_y[:-2, :]) / (2 * dy)
+
+        divergence = dvx_dx + dvy_dy
+
+        # Compute curl (2D): ∂vy/∂x - ∂vx/∂y
+        dvy_dx = np.zeros_like(flow_y)
+        dvx_dy = np.zeros_like(flow_x)
+
+        dvy_dx[:, 1:-1] = (flow_y[:, 2:] - flow_y[:, :-2]) / (2 * dx)
+        dvx_dy[1:-1, :] = (flow_x[2:, :] - flow_x[:-2, :]) / (2 * dy)
+
+        curl = dvy_dx - dvx_dy
+
+        # Only consider cells with sufficient samples
+        min_samples = 3
+        valid_mask = counts >= min_samples
+
+        if valid_mask.sum() > 0:
+            div_valid = divergence[valid_mask]
+            curl_valid = curl[valid_mask]
+
+            return {
+                "mean_divergence": float(np.mean(div_valid)),
+                "std_divergence": float(np.std(div_valid)),
+                "mean_abs_divergence": float(np.mean(np.abs(div_valid))),
+                "mean_curl": float(np.mean(curl_valid)),
+                "std_curl": float(np.std(curl_valid)),
+                "mean_abs_curl": float(np.mean(np.abs(curl_valid))),
+                "curl_circulation": float(np.sum(curl_valid) * dx * dy),  # Total circulation
+                "n_valid_cells": int(valid_mask.sum()),
+                "divergence_grid": divergence,
+                "curl_grid": curl,
+                "counts_grid": counts,
+            }
+        else:
+            return {
+                "mean_divergence": 0.0,
+                "std_divergence": 0.0,
+                "mean_abs_divergence": 0.0,
+                "mean_curl": 0.0,
+                "std_curl": 0.0,
+                "mean_abs_curl": 0.0,
+                "curl_circulation": 0.0,
+                "n_valid_cells": 0,
+                "divergence_grid": divergence,
+                "curl_grid": curl,
+                "counts_grid": counts,
+            }
+
     # Get unique regime names (handles multiple cycles)
     unique_regime_names = list(dict.fromkeys(result.regime_names))  # Preserves order, removes duplicates
 
@@ -1280,6 +1479,38 @@ def run_full_analysis(
             print(f"    {metric}: F={f_stat:.1f}, p={p_val:.2e}, η²={eta_sq:.3f} ({effect_label})")
 
     # =========================================================================
+    # STEP 5c: Compute Field-Level Metrics (Divergence, Curl) per Regime
+    # =========================================================================
+    print("\n  Computing field-level metrics (divergence, curl) per regime...")
+
+    field_metrics = {}
+    regime_flow_data = {}  # Store flow field data for each regime for plotting
+
+    for name in unique_regime_names:
+        matching_ids = [i for i, n in enumerate(result.regime_names) if n == name]
+        mask = np.isin(labels_aligned, matching_ids)
+        regime_embedded = embedded[mask]
+
+        if len(regime_embedded) > 100:
+            fmetrics = compute_field_metrics(regime_embedded, embedder.bounds, grid_size=15)
+
+            # Store scalar metrics (exclude grids for JSON serialization)
+            field_metrics[name] = {k: v for k, v in fmetrics.items()
+                                   if not k.endswith('_grid')}
+
+            # Store flow data for plotting
+            X, Y, flow_x, flow_y, counts = compute_flow_field(regime_embedded, embedder.bounds, grid_size=15)
+            regime_flow_data[name] = {
+                "X": X, "Y": Y, "flow_x": flow_x, "flow_y": flow_y,
+                "counts": counts, "embedded": regime_embedded,
+                "divergence": fmetrics["divergence_grid"],
+                "curl": fmetrics["curl_grid"],
+            }
+
+            print(f"    {name}: div={fmetrics['mean_divergence']:.4f}±{fmetrics['std_divergence']:.4f}, "
+                  f"curl={fmetrics['mean_abs_curl']:.4f}, circulation={fmetrics['curl_circulation']:.4f}")
+
+    # =========================================================================
     # STEP 6: Generate Figures
     # =========================================================================
     print("\n" + "-" * 50)
@@ -1327,8 +1558,9 @@ def run_full_analysis(
     ax_a.set_xlabel("Time (s)")
     ax_a.set_title("A) Ground-Truth Regime Sequence", fontweight='bold')
     ax_a.set_yticks([])
-    handles = [plt.Rectangle((0,0),1,1, color=regime_colors[n], alpha=0.7) for n in result.regime_names]
-    ax_a.legend(handles, result.regime_names, loc='upper right', ncol=2)
+    # Use unique regime names for legend (avoid duplicates when using cycles)
+    handles = [plt.Rectangle((0,0),1,1, color=regime_colors[n], alpha=0.7) for n in unique_regime_names]
+    ax_a.legend(handles, unique_regime_names, loc='upper right', ncol=2)
 
     # Panel B: Embedded trajectories
     ax_b = fig2.add_subplot(gs[0, 1])
@@ -1444,6 +1676,96 @@ def run_full_analysis(
     fig3.savefig(output_dir / "fig_discriminability.pdf", dpi=300, bbox_inches="tight")
     print(f"  Saved: fig_discriminability.png/pdf")
 
+    # Figure 4: Regime-specific flow fields (2x2 small multiples)
+    fig4, axes = plt.subplots(2, 2, figsize=(12, 12))
+    axes = axes.flatten()
+
+    for idx, name in enumerate(unique_regime_names[:4]):  # Limit to 4 regimes
+        ax = axes[idx]
+
+        if name in regime_flow_data:
+            data = regime_flow_data[name]
+            X, Y = data["X"], data["Y"]
+            flow_x, flow_y = data["flow_x"], data["flow_y"]
+            counts = data["counts"]
+            regime_embedded = data["embedded"]
+
+            # Plot density background
+            regime_density = compute_density_on_grid(regime_embedded, embedder.bounds, bins=50)
+            ax.imshow(regime_density, origin='lower', extent=list(embedder.bounds),
+                     cmap='Blues', alpha=0.6, aspect='equal')
+
+            # Plot flow field where we have sufficient samples
+            mask = counts > 3
+            if mask.any():
+                mag = np.sqrt(flow_x[mask]**2 + flow_y[mask]**2)
+                norm_fx = np.where(mag > 0, flow_x[mask] / mag, 0)
+                norm_fy = np.where(mag > 0, flow_y[mask] / mag, 0)
+                ax.quiver(X[mask], Y[mask], norm_fx, norm_fy, mag, cmap='inferno', alpha=0.85,
+                         scale=25, width=0.005, headwidth=4, headlength=5)
+
+            # Add field metrics annotation
+            if name in field_metrics:
+                fm = field_metrics[name]
+                ax.text(0.02, 0.98,
+                       f"div: {fm['mean_divergence']:.3f}\ncurl: {fm['mean_abs_curl']:.3f}",
+                       transform=ax.transAxes, va='top', ha='left', fontsize=9,
+                       bbox=dict(boxstyle='round', facecolor='white', alpha=0.8))
+
+        ax.set_title(f"{name.capitalize()}", fontweight='bold', color=regime_colors.get(name, 'black'))
+        ax.set_xlabel("Dim 1")
+        ax.set_ylabel("Dim 2")
+        ax.set_aspect('equal')
+
+    fig4.suptitle("Regime-Specific Flow Fields (Density + Velocity)", fontsize=14, fontweight='bold')
+    fig4.tight_layout()
+    fig4.savefig(output_dir / "fig_flow_fields.png", dpi=150, bbox_inches="tight")
+    fig4.savefig(output_dir / "fig_flow_fields.pdf", dpi=300, bbox_inches="tight")
+    print(f"  Saved: fig_flow_fields.png/pdf")
+
+    # Figure 5: Laplacian eigenvalue spectra comparison
+    fig5, axes5 = plt.subplots(1, 2, figsize=(14, 5))
+
+    # Panel A: Eigenvalue spectra
+    ax5a = axes5[0]
+    for name in unique_regime_names:
+        if name in topology_spectra:
+            eigs = topology_spectra[name]["eigenvalues"]
+            ax5a.plot(range(len(eigs)), eigs, 'o-', label=name, color=regime_colors.get(name, '#888888'),
+                     markersize=4, alpha=0.8)
+    ax5a.set_xlabel("Eigenvalue Index")
+    ax5a.set_ylabel("Eigenvalue (λ)")
+    ax5a.set_title("A) Laplacian Eigenvalue Spectra", fontweight='bold')
+    ax5a.legend()
+    ax5a.axhline(y=0, color='gray', linestyle='--', alpha=0.5)
+
+    # Panel B: Summary metrics comparison
+    ax5b = axes5[1]
+    metrics_to_plot = ["lambda_2", "spectral_gap", "density"]
+    metric_labels = ["λ₂ (Algebraic\nConnectivity)", "Spectral Gap\n(λ₂/λ_max)", "Edge Density"]
+    x = np.arange(len(unique_regime_names))
+    width = 0.25
+
+    for j, (metric, label) in enumerate(zip(metrics_to_plot, metric_labels)):
+        values = [topology_spectra.get(name, {}).get(metric, 0) for name in unique_regime_names]
+        # Normalize for visualization
+        max_val = max(values) if values and max(values) > 0 else 1
+        norm_values = [v / max_val for v in values]
+        offset = (j - 1) * width
+        ax5b.bar(x + offset, norm_values, width, label=label, alpha=0.8)
+
+    ax5b.set_xticks(x)
+    ax5b.set_xticklabels(unique_regime_names)
+    ax5b.set_ylabel("Normalized Value")
+    ax5b.set_title("B) Topology Spectral Properties", fontweight='bold')
+    ax5b.legend(loc='upper right')
+
+    fig5.suptitle("Laplacian Spectral Analysis: Topology Verification", fontsize=14, fontweight='bold')
+    fig5.tight_layout()
+    fig5.savefig(output_dir / "fig_laplacian_spectra.png", dpi=150, bbox_inches="tight")
+    fig5.savefig(output_dir / "fig_laplacian_spectra.pdf", dpi=300, bbox_inches="tight")
+    print(f"  Saved: fig_laplacian_spectra.png/pdf")
+
     if not show_plots:
         plt.close('all')
     else:
@@ -1456,10 +1778,17 @@ def run_full_analysis(
     print("Step 7: Saving Results")
     print("-" * 50)
 
+    # Prepare topology spectra for JSON (remove eigenvalue arrays for cleaner output)
+    topology_spectra_summary = {}
+    for name, spec in topology_spectra.items():
+        topology_spectra_summary[name] = {k: v for k, v in spec.items() if k != "eigenvalues"}
+
     results = {
         "parameters": params,
         "synchrony_stats": sync_stats,
         "regime_metrics": regime_metrics,
+        "field_metrics": field_metrics,
+        "topology_spectra": topology_spectra_summary,
         "discriminability": discriminability,
         "n_samples": int(result.y.shape[1]),
         "n_regimes": len(result.regime_names),
