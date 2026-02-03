@@ -2,7 +2,7 @@
 
 ## Project Overview
 
-This repository implements a **ConvLSTM-based autoencoder framework** for analyzing resting-state EEG data to discover dynamical biomarkers of Mild Cognitive Impairment (MCI). The project is part of a PhD thesis investigating state-aware analysis of EEG signals.
+This repository implements a **Transformer-based autoencoder framework** for analyzing resting-state EEG data to discover dynamical biomarkers of Mild Cognitive Impairment (MCI). The project is part of a PhD thesis investigating state-aware analysis of EEG signals.
 
 ### Central Research Question
 > How can state-aware analysis of resting-state EEG reveal reliable dynamical biomarkers for Mild Cognitive Impairment (MCI)?
@@ -24,9 +24,12 @@ A clean, modern Python package with proper structure:
 src/eeg_biomarkers/
 ├── __init__.py
 ├── models/                    # Model architectures
-│   ├── autoencoder.py        # ConvLSTMAutoencoder (main model)
-│   ├── encoder.py            # ConvLSTMEncoder
-│   └── decoder.py            # ConvLSTMDecoder
+│   ├── transformer_autoencoder.py  # TransformerAutoencoder (main model)
+│   ├── transformer_encoder.py      # TransformerEncoder
+│   ├── transformer_decoder.py      # TransformerDecoder
+│   ├── autoencoder.py              # ConvLSTMAutoencoder (legacy)
+│   ├── encoder.py                  # ConvLSTMEncoder (legacy)
+│   └── decoder.py                  # ConvLSTMDecoder (legacy)
 ├── data/                      # Data loading & preprocessing
 │   ├── dataset.py            # EEGDataset, EEGDataModule
 │   └── preprocessing.py      # Phase extraction, chunking
@@ -45,8 +48,13 @@ src/eeg_biomarkers/
 **Configuration**: `configs/` (Hydra YAML)
 ```
 configs/
-├── config.yaml               # Main config
-├── model/                    # Model configs (base.yaml, complex.yaml)
+├── config.yaml               # Main config (default: model=transformer)
+├── model/                    # Model configs
+│   ├── transformer.yaml      # Transformer autoencoder (PREFERRED)
+│   ├── transformer_v2.yaml   # Transformer variant
+│   ├── transformer_v3.yaml   # Transformer variant
+│   ├── base.yaml             # ConvLSTM (legacy)
+│   └── complex.yaml          # ConvLSTM complex (legacy)
 ├── data/                     # Data configs (default.yaml, full.yaml)
 ├── training/                 # Training configs
 └── experiment/               # Experiment configs (integration_test.yaml)
@@ -75,11 +83,11 @@ uv sync
 # Or with pip
 pip install -e ".[dev]"
 
-# Train with default config
-python -m eeg_biomarkers.training.train
+# Train with default config (Transformer autoencoder)
+python -m eeg_biomarkers.training.train model=transformer
 
 # Train with custom config
-python -m eeg_biomarkers.training.train model=complex training.epochs=200
+python -m eeg_biomarkers.training.train model=transformer training.epochs=200
 
 # Run tests
 pytest tests/
@@ -125,14 +133,14 @@ pytest tests/
 
 ### Modern Package
 ```bash
-# Training
-python -m eeg_biomarkers.training.train
+# Training (Transformer autoencoder)
+python -m eeg_biomarkers.training.train model=transformer
 
 # With config overrides
-python -m eeg_biomarkers.training.train model=complex data=full training.epochs=200
+python -m eeg_biomarkers.training.train model=transformer data=full training.epochs=200
 
-# Multi-run sweep
-python -m eeg_biomarkers.training.train --multirun model=base,complex
+# Multi-run sweep (compare transformer variants)
+python -m eeg_biomarkers.training.train --multirun model=transformer,transformer_v2,transformer_v3
 
 # Tests
 pytest tests/ -v
@@ -203,11 +211,12 @@ Key test files:
 Override any config via command line:
 
 ```bash
-# Change model
-python -m eeg_biomarkers.training.train model=complex
+# Use transformer model (default)
+python -m eeg_biomarkers.training.train model=transformer
 
 # Change multiple settings
 python -m eeg_biomarkers.training.train \
+    model=transformer \
     model.encoder.hidden_size=128 \
     training.epochs=50 \
     experiment.name="my_experiment"
@@ -255,13 +264,14 @@ Key artifacts available:
 
 | Legacy Location | Modern Location |
 |-----------------|-----------------|
-| `scripts/utils.py:ConvLSTMEEGAutoencoder` | `src/eeg_biomarkers/models/autoencoder.py` |
+| `scripts/utils.py:ConvLSTMEEGAutoencoder` | `src/eeg_biomarkers/models/transformer_autoencoder.py` |
 | `scripts/train_model.py` | `src/eeg_biomarkers/training/train.py` |
 | `scripts/utils.py:extract_phase()` | `src/eeg_biomarkers/data/preprocessing.py:extract_phase_circular()` |
 | `scripts/cloud-pod/RQA.py` | `src/eeg_biomarkers/analysis/rqa.py` |
 | `scripts/app/classification_cv.py` | `src/eeg_biomarkers/analysis/classification.py` |
 
 Key improvements in modern package:
+- **Transformer architecture** (attention-based, replaces ConvLSTM)
 - Circular phase representation (cos, sin)
 - RR-controlled thresholding
 - Proper GroupKFold by subject
@@ -308,6 +318,7 @@ Key improvements in modern package:
 3. **Train on FULL dataset** (78 MCI + 31 HC):
    ```bash
    uv run python -m eeg_biomarkers.training.train \
+       model=transformer \
        data=full \
        training.epochs=300 \
        model.encoder.hidden_size=128

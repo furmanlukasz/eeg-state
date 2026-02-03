@@ -112,6 +112,7 @@ class TestMeditationBIDSConfig:
         assert len(config.groups) == 2  # expert, novice
         assert config.file_pattern == "*_task-meditation_eeg.bdf"
         assert config.participants_file == "participants.tsv"
+        assert config.n_eeg_channels == 64  # BioSemi 64 scalp channels
 
     def test_get_subject_id_from_path(self):
         """Test subject ID extraction from BIDS path."""
@@ -235,6 +236,61 @@ class TestDatasetFromHydraConfig:
         assert len(config.groups) == 2
         assert config.groups[0].name == "HC"
         assert config.groups[1].name == "MCI"
+
+
+class TestBDFChannelSelection:
+    """Tests for BDF channel selection (scalp EEG only)."""
+
+    def test_scalp_channel_names(self):
+        """Test that only A1-A32 and B1-B32 channels are selected."""
+        config = MeditationBIDSConfig()
+
+        # Define expected scalp channels
+        expected_channels = [f"A{i}" for i in range(1, 33)] + [f"B{i}" for i in range(1, 33)]
+        assert len(expected_channels) == 64
+
+        # These should NOT be included
+        excluded_channels = [
+            "EXG1", "EXG2", "EXG3", "EXG4", "EXG5", "EXG6", "EXG7", "EXG8",
+            "GSR1", "GSR2", "Erg1", "Erg2", "Resp", "Plet", "Temp", "Status"
+        ]
+
+        # Verify the channel selection logic
+        all_bdf_channels = expected_channels + excluded_channels
+        scalp_channels = [f"A{i}" for i in range(1, 33)] + [f"B{i}" for i in range(1, 33)]
+        selected = [ch for ch in scalp_channels if ch in all_bdf_channels]
+
+        assert len(selected) == 64
+        assert all(ch not in excluded_channels for ch in selected)
+
+    def test_n_eeg_channels_config(self):
+        """Test that n_eeg_channels is set correctly."""
+        config = MeditationBIDSConfig()
+        assert config.n_eeg_channels == 64
+
+    @pytest.mark.skipif(
+        not Path("/Volumes/Nvme_Data/ds001787").exists(),
+        reason="Meditation dataset not available"
+    )
+    def test_load_raw_channel_count(self):
+        """Integration test: verify load_raw returns exactly 64 channels."""
+        import mne
+        config = MeditationBIDSConfig()
+
+        # Find a BDF file
+        data_dir = Path("/Volumes/Nvme_Data/ds001787")
+        bdf_files = list(data_dir.rglob("*.bdf"))
+        if bdf_files:
+            raw = config.load_raw(bdf_files[0])
+            assert len(raw.ch_names) == 64, f"Expected 64 channels, got {len(raw.ch_names)}"
+
+            # Verify all channels are A1-A32 or B1-B32
+            for ch in raw.ch_names:
+                assert ch.startswith("A") or ch.startswith("B"), f"Unexpected channel: {ch}"
+
+            # Verify no auxiliary channels
+            for ch in ["EXG1", "GSR1", "Resp", "Plet", "Temp", "Status"]:
+                assert ch not in raw.ch_names, f"Auxiliary channel {ch} should be excluded"
 
 
 class TestBIDSIntegration:

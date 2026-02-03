@@ -356,16 +356,31 @@ class MeditationBIDSConfig(DatasetConfig):
         return files
 
     def load_raw(self, file_path: Path) -> Any:
-        """Load MNE Raw from BDF file."""
+        """Load MNE Raw from BDF file.
+
+        Selects only the 64 BioSemi scalp EEG channels (A1-A32, B1-B32),
+        excluding auxiliary channels (EXG, GSR, Resp, Plet, Temp, Erg, Status).
+        """
         import mne
         mne.set_log_level("WARNING")
 
         raw = mne.io.read_raw_bdf(file_path, preload=True)
 
-        # Select only EEG channels
-        eeg_picks = mne.pick_types(raw.info, eeg=True, exclude=[])
-        if len(eeg_picks) > 0:
-            raw = raw.pick(eeg_picks)
+        # Select only the 64 BioSemi scalp EEG channels (A1-A32, B1-B32)
+        # Exclude: EXG1-8, GSR1-2, Erg1-2, Resp, Plet, Temp, Status
+        scalp_channels = [f"A{i}" for i in range(1, 33)] + [f"B{i}" for i in range(1, 33)]
+        available_scalp = [ch for ch in scalp_channels if ch in raw.ch_names]
+
+        if len(available_scalp) != self.n_eeg_channels:
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.warning(
+                f"Expected {self.n_eeg_channels} scalp EEG channels, found {len(available_scalp)} "
+                f"in {file_path.name}"
+            )
+
+        if available_scalp:
+            raw = raw.pick(available_scalp)
 
         return raw
 

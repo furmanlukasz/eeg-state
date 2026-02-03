@@ -2,7 +2,7 @@
 # Override with: python -m eeg_biomarkers.training.train model=complex data=full
 
 defaults:
-  - model: base
+  - model: transformer
   - data: default
   - training: default
   - _self_

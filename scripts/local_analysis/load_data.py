@@ -42,10 +42,14 @@ def load_eeg_from_file(file_path: Path, verbose: bool = True, apply_preprocessin
         raw = mne.io.read_raw_fif(file_path, preload=True)
     elif suffix == ".bdf":
         raw = mne.io.read_raw_bdf(file_path, preload=True)
-        # For BDF files, select only EEG channels (exclude GSR, respiration, etc.)
-        eeg_picks = mne.pick_types(raw.info, eeg=True, exclude=[])
-        if len(eeg_picks) > 0:
-            raw = raw.pick(eeg_picks)
+        # For BDF files, select only the 64 BioSemi scalp EEG channels (A1-A32, B1-B32)
+        # Exclude auxiliary channels: EXG1-8, GSR1-2, Erg1-2, Resp, Plet, Temp, Status
+        scalp_channels = [f"A{i}" for i in range(1, 33)] + [f"B{i}" for i in range(1, 33)]
+        available_scalp = [ch for ch in scalp_channels if ch in raw.ch_names]
+        if available_scalp:
+            raw = raw.pick(available_scalp)
+        if verbose and len(available_scalp) != 64:
+            print(f"  Warning: Expected 64 scalp channels, found {len(available_scalp)}")
     else:
         raise ValueError(f"Unsupported file format: {suffix}")
 
