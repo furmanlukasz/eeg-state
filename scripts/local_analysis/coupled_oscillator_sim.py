@@ -933,14 +933,14 @@ def demo_simulation(
 def run_full_analysis(
     output_dir: Optional[str] = None,
     total_duration_s: float = 180.0,
-    coupling_strength: float = 2.0,
+    coupling_strength: float = 5.0,
     noise_std: float = 0.1,
     obs_noise_std: float = 0.05,
     obs_noise_color: float = 1.0,
     transition_s: float = 0.3,
     n_epochs: int = 50,
     hidden_size: int = 32,
-    embedding_method: str = "pca",
+    embedding_method: str = "umap",
     seed: int = 42,
     show_plots: bool = False,
     quick: bool = False,
@@ -1061,15 +1061,13 @@ def run_full_analysis(
     net.default_topologies(seed=seed)
 
     # Regime schedule: support multiple cycles for transition tracking
-    # Default: 5s per regime (rapid switching to test transition detection)
-    # This creates many transitions within the recording, which is more
-    # realistic for testing state discovery methods
+    # Default: 10s per regime (4 cycles for 160s total with 180s recording)
     regime_names_order = ["global", "cluster", "sparse", "ring"]
     if regime_duration_s is not None:
         per_regime = regime_duration_s
     else:
-        # Default to 5s per regime (not dividing by n_cycles)
-        per_regime = 5.0
+        # Default to 10s per regime
+        per_regime = 10.0
         # Calculate how many cycles fit in the total duration
         n_cycles = int(total_duration_s / (4 * per_regime))
 
@@ -1838,14 +1836,14 @@ if __name__ == "__main__":
 
     parser = argparse.ArgumentParser(description="Coupled Stuart-Landau oscillator simulation")
     parser.add_argument("--duration", type=float, default=180.0, help="Total duration (s)")
-    parser.add_argument("--coupling", type=float, default=2.0, help="Coupling strength")
+    parser.add_argument("--coupling", type=float, default=5.0, help="Coupling strength")
     parser.add_argument("--noise", type=float, default=0.1, help="Oscillator noise std")
     parser.add_argument("--obs-noise", type=float, default=0.05, help="Observation noise std")
     parser.add_argument("--obs-noise-color", type=float, default=1.0, help="Colored noise exponent")
     parser.add_argument("--transition", type=float, default=0.3, help="Transition duration (s)")
     parser.add_argument("--epochs", type=int, default=50, help="Training epochs")
     parser.add_argument("--hidden", type=int, default=32, help="Hidden size")
-    parser.add_argument("--embedding", type=str, default="pca", choices=["pca", "umap"], help="Embedding method")
+    parser.add_argument("--embedding", type=str, default="umap", choices=["pca", "umap"], help="Embedding method")
     parser.add_argument("--seed", type=int, default=42, help="Random seed")
     parser.add_argument("--output", type=str, default=None, help="Output directory")
     parser.add_argument("--quick", action="store_true", help="Quick mode (fewer epochs)")
