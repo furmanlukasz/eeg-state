@@ -908,25 +908,50 @@ def run_kinetic_energy_analysis(
     print("Step 6: Saving Results")
     print("-" * 50)
 
+    # Helper to convert numpy types to Python native types for JSON
+    def to_native(obj):
+        if isinstance(obj, np.ndarray):
+            return obj.tolist()
+        elif isinstance(obj, (np.float32, np.float64)):
+            return float(obj)
+        elif isinstance(obj, (np.int32, np.int64)):
+            return int(obj)
+        elif isinstance(obj, dict):
+            return {k: to_native(v) for k, v in obj.items()}
+        elif isinstance(obj, (list, tuple)):
+            return [to_native(v) for v in obj]
+        return obj
+
     results = {
         "parameters": {
             "velocity_method": velocity_method,
             "savgol_window": savgol_window,
-            "sfreq": sfreq,
+            "sfreq": float(sfreq),
             "source_file": str(trajectories_path),
         },
-        "global_metrics": asdict(global_metrics),
-        "regime_metrics": {name: asdict(m) for name, m in regime_metrics.items()},
-        "discriminability": discriminability,
+        "global_metrics": to_native(asdict(global_metrics)),
+        "regime_metrics": {name: to_native(asdict(m)) for name, m in regime_metrics.items()},
+        "discriminability": to_native(discriminability),
         "landscape": {
-            "bounds": landscape.bounds,
-            "grid_shape": landscape.mean_energy.shape,
+            "bounds": list(landscape.bounds),
+            "grid_shape": list(landscape.mean_energy.shape),
             "valid_cells": int(valid_cells),
         },
     }
 
+    # Custom JSON encoder for numpy types
+    class NumpyEncoder(json.JSONEncoder):
+        def default(self, obj):
+            if isinstance(obj, np.ndarray):
+                return obj.tolist()
+            if isinstance(obj, (np.float32, np.float64, np.floating)):
+                return float(obj)
+            if isinstance(obj, (np.int32, np.int64, np.integer)):
+                return int(obj)
+            return super().default(obj)
+
     with open(output_dir / "kinetic_energy_results.json", "w") as f:
-        json.dump(results, f, indent=2)
+        json.dump(results, f, indent=2, cls=NumpyEncoder)
     print(f"  Saved: kinetic_energy_results.json")
 
     # Save energy time series
