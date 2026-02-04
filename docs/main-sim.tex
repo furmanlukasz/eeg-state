@@ -281,7 +281,7 @@ Regime discriminability is assessed using one-way ANOVA across the four topology
 \end{equation}
 where $\eta^2 > 0.14$ indicates a large effect, $0.06$--$0.14$ medium, and $< 0.06$ small.
 
-Metrics are computed on non-overlapping windows (50 samples $\approx$ 0.2~s after 4$\times$ compression) to ensure independent observations for statistical testing.
+Metrics are computed on non-overlapping windows (50 samples $\approx$ 0.2~s after 4$\times$ compression) to reduce short-timescale autocorrelation and provide approximately independent windows for descriptive discriminability analysis. Effect sizes ($\eta^2$) are reported as primary summaries rather than $p$-values alone.
 
 % =========================
 \section{Results: Validation on Coupled Oscillator Network}
@@ -401,7 +401,7 @@ where $\mathbf{v}(t)$ is the velocity vector in latent space. Although mathemati
 \paragraph{Interpretation.}
 This quantity is explicitly \emph{not} a measure of metabolic energy consumption---scalp signals do not provide direct access to cellular energetics. Rather, $E_k(t)$ serves as a dynamical activity proxy that can be interpreted as ``reconfiguration effort'' or ``state-space mobility'': how vigorously the system traverses its manifold at each moment.
 
-Figure~\ref{fig:kinetic_energy} presents the kinetic energy analysis. Panel~A shows the energy time series colored by regime, revealing that regime structure is visible as changes in variability and burstiness, not just mean level---consistent with metastable dynamics featuring episodes of high activity embedded in quieter motion. Panel~B displays the per-regime energy distributions, showing systematic shifts with heavy tails indicating intermittent bursts. Panel~C presents the energy landscape on the 2D embedding, revealing that some regions of the manifold are energetically more demanding to traverse than others. Panel~D summarizes mean energy and coefficient of variation by regime.
+Figure~\ref{fig:kinetic_energy} presents the kinetic energy analysis. Panel~A shows the energy time series colored by regime, revealing that regime structure is visible as changes in variability and burstiness, not just mean level---consistent with intermittent dynamics featuring episodes of high activity embedded in quieter motion. Panel~B displays the per-regime energy distributions, showing systematic shifts with heavy tails indicating intermittent bursts. Panel~C presents the energy landscape: $E_k$ is computed in the full 32-dimensional latent space, then mean values are mapped to bins of the 2D visualization embedding to reveal spatial structure. This shows that some regions of the manifold are energetically more demanding to traverse than others. Panel~D summarizes mean energy and coefficient of variation by regime.
 
 \begin{figure*}[t]
     \centering
@@ -410,28 +410,32 @@ Figure~\ref{fig:kinetic_energy} presents the kinetic energy analysis. Panel~A sh
     \label{fig:kinetic_energy}
 \end{figure*}
 
-Table~\ref{tab:kinetic_energy} reports the kinetic energy metrics by regime. The ring topology shows the highest mean energy ($E_k = 0.033$) and substantial variability (CV = 0.84), indicating rapid, intermittent state-space traversal. The cluster topology shows the lowest energy ($E_k = 0.022$) and lowest variability (CV = 0.72), consistent with stable, ``resting'' dynamics. Discriminability analysis yields $\eta^2 = 0.21$ (large effect), confirming that kinetic energy captures regime-dependent structure.
+Table~\ref{tab:kinetic_energy} reports the kinetic energy metrics by regime, computed from the same velocity vectors as mean speed (ensuring $\mathbb{E}[E_k] = \mathbb{E}[\|v\|^2]$). The ring topology shows the highest mean energy ($E_k = 0.033$) and substantial variability (CV = 0.84), indicating rapid, intermittent state-space traversal. The cluster topology shows the lowest energy ($E_k = 0.022$) and lowest variability (CV = 0.72), consistent with stable, ``resting'' dynamics. Discriminability analysis yields $\eta^2 = 0.21$ (large effect), confirming that kinetic energy captures regime-dependent structure.
 
 \begin{table}[h]
 \centering
-\caption{\textbf{Kinetic energy metrics by coupling topology.} Mean values and discriminability ($\eta^2$) for the latent kinetic energy proxy.}
+\caption{\textbf{Kinetic energy metrics by coupling topology.} Mean values computed from the same velocity source as speed metrics. Q95/Q50 ratio indicates tail heaviness (higher = more intermittent bursts).}
 \label{tab:kinetic_energy}
 \small
 \begin{tabular}{lcccc}
 \toprule
 \textbf{Metric} & \textbf{Global} & \textbf{Cluster} & \textbf{Sparse} & \textbf{Ring} \\
 \midrule
-Mean $E_k$ & 0.024 & 0.022 & 0.027 & 0.033 \\
-CV & 0.78 & 0.72 & 0.79 & 0.84 \\
-Tail index & 0.16 & 0.15 & 0.15 & 0.16 \\
+Mean speed $\|v\|$ & 0.145 & 0.139 & 0.152 & 0.167 \\
+Mean $E_k = \|v\|^2$ & 0.024 & 0.022 & 0.027 & 0.033 \\
+CV($E_k$) & 0.78 & 0.72 & 0.79 & 0.84 \\
+Q95/Q50($E_k$) & 3.47 & 2.94 & 3.47 & 4.29 \\
 \bottomrule
 \end{tabular}
 \vspace{0.5em}
 
-\footnotesize{Discriminability: $F = 17.7$, $p = 3.3 \times 10^{-10}$, $\eta^2 = 0.21$ (large).}
+\footnotesize{Discriminability for $E_k$: $F = 17.7$, $p = 3.3 \times 10^{-10}$, $\eta^2 = 0.21$ (large).}
 \end{table}
 
-Notably, the kinetic energy ordering (ring $>$ sparse $>$ global $>$ cluster) differs from the speed ordering (global $>$ cluster $>$ sparse $>$ ring), indicating that these metrics capture complementary aspects of dynamical organization. Speed reflects average motion rate, while kinetic energy---being quadratic in velocity---amplifies contributions from high-velocity excursions, revealing intermittent burst structure that mean speed obscures.
+The regime ordering is consistent between speed and kinetic energy (ring $>$ sparse $>$ global $>$ cluster), as expected when both are derived from the same velocity vectors. However, the Q95/Q50 ratio reveals that ring topology exhibits the heaviest tails (4.29), indicating more frequent high-energy bursts compared to cluster topology (2.94). This tail structure---captured by kinetic energy but obscured in mean speed---reflects the intermittent dynamics characteristic of ring coupling, where traveling wave patterns produce episodic acceleration events.
+
+\paragraph{Note on Tables~\ref{tab:regime_metrics} vs.\ \ref{tab:kinetic_energy}.}
+The speed values in Table~\ref{tab:regime_metrics} (flow metrics) were computed after standardization of the latent space, while Table~\ref{tab:kinetic_energy} reports raw latent velocities. Both orderings are consistent within their respective analyses; the absolute magnitudes differ due to the normalization.
 
 % =========================
 \section{Discussion}
