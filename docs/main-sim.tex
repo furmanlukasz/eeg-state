@@ -201,6 +201,15 @@ Transition smoothing & 0.3~s \\
 \end{tabular}
 \end{table}
 
+Figure~\ref{fig:electrode_demo} illustrates the raw observations from the coupled oscillator network, showing how regime switches manifest in the multichannel time series and spectral characteristics.
+
+\begin{figure}[h]
+    \centering
+    \includegraphics[width=0.48\textwidth]{figures/paper1/fig_electrode_demo.png}
+    \caption{\textbf{Raw observations from coupled oscillator simulation.} Top: multichannel time series (selected channels) showing regime switches as vertical dashed lines. Middle: power spectral density (mean across channels) with characteristic oscillator peak. Bottom: Hilbert amplitude envelope (channel 0) showing amplitude modulations across regimes.}
+    \label{fig:electrode_demo}
+\end{figure}
+
 \subsection{Preprocessing and circular phase--amplitude representation}
 
 Let $\mathbf{x}(t) \in \mathbb{R}^{C}$ denote the multichannel signal. After bandpass filtering (2--48~Hz, zero-phase FIR filter), the analytic signal for each channel is obtained via the Hilbert transform applied to the continuous signal, yielding instantaneous phase $\phi_c(t)$ and amplitude $a_c(t)$ \citep{Boashash1992}.
@@ -290,7 +299,7 @@ Figure~\ref{fig:main_analysis} summarizes the main validation results. Panel~A s
 
 \begin{figure*}[t]
     \centering
-    \includegraphics[width=1.0\textwidth]{figures/paper1/fig_analysis_main.png}
+    \includegraphics[width=1.0\textwidth]{figures/paper3/fig_analysis_main.png}
     \caption{\textbf{Dynamical microscope analysis of coupled Stuart--Landau oscillator network.} (A) Ground-truth regime sequence: four coupling topologies (global, cluster, sparse, ring) cycling every 10~s for 160~s total. (B) UMAP-embedded latent trajectories colored by regime; regimes show substantial spatial overlap but visible clustering. (C) Density and flow field visualization showing local drift patterns across the shared manifold. (D) Normalized flow metrics by regime, demonstrating topology-dependent differences in speed, speed variability, tortuosity, and explored variance.}
     \label{fig:main_analysis}
 \end{figure*}
@@ -352,7 +361,7 @@ Figure~\ref{fig:flow_fields} shows regime-specific flow field visualizations, re
 
 \begin{figure*}[t]
     \centering
-    \includegraphics[width=1.0\textwidth]{figures/paper1/fig_flow_fields.png}
+    \includegraphics[width=1.0\textwidth]{figures/paper3/fig_flow_fields.png}
     \caption{\textbf{Regime-specific flow fields.} Each panel shows the density (background) and flow field (arrows) for trajectories within a single coupling topology. Despite substantial spatial overlap, regimes exhibit distinct local flow patterns. Divergence and curl values are annotated for each regime.}
     \label{fig:flow_fields}
 \end{figure*}
@@ -369,7 +378,7 @@ Figure~\ref{fig:discriminability} presents violin plots of per-window metric dis
 
 \begin{figure*}[t]
     \centering
-    \includegraphics[width=1.0\textwidth]{figures/paper1/fig_discriminability.png}
+    \includegraphics[width=1.0\textwidth]{figures/paper3/fig_discriminability.png}
     \caption{\textbf{Regime discriminability: per-window metric distributions.} Violin plots show the distribution of speed, variance, and tortuosity across non-overlapping windows for each regime. Effect sizes ($\eta^2$) and significance levels are annotated. Speed and variance show clear regime separation with large effect sizes, while tortuosity distributions overlap substantially.}
     \label{fig:discriminability}
 \end{figure*}
