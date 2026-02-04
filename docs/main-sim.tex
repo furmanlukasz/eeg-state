@@ -103,7 +103,7 @@ The autoencoder serves as a nonlinear coordinate transformation, not a model of 
 
 \begin{figure*}[t]
     \centering
-    \includegraphics[width=0.95\textwidth]{figures/paper1/fig01_workflow.png}
+    \includegraphics[width=0.95\textwidth]{figures/paper3/fig01_workflow_v3.png}
     \caption{Workflow schematic of the dynamical microscope framework. Multichannel oscillatory signals are transformed into circular phase--amplitude features, encoded into a latent trajectory via autoencoder, and analyzed using flow field estimation and trajectory metrics. The depicted ``trajectory'' is schematic; analyses emphasize both time-ordered realizations and ensemble summaries (densities and flow fields) obtained by pooling across time and/or realizations.}
     \label{fig:workflow}
 \end{figure*}
@@ -205,7 +205,7 @@ Figure~\ref{fig:electrode_demo} illustrates the raw observations from the couple
 
 \begin{figure}[h]
     \centering
-    \includegraphics[width=0.48\textwidth]{figures/paper1/fig_electrode_demo.png}
+    \includegraphics[width=0.48\textwidth]{figures/paper3/fig_electrode_timeseries.png}
     \caption{\textbf{Raw observations from coupled oscillator simulation.} Top: multichannel time series (selected channels) showing regime switches as vertical dashed lines. Middle: power spectral density (mean across channels) with characteristic oscillator peak. Bottom: Hilbert amplitude envelope (channel 0) showing amplitude modulations across regimes.}
     \label{fig:electrode_demo}
 \end{figure}
@@ -390,6 +390,49 @@ The violin plots confirm that:
     \item Tortuosity distributions overlap almost completely, explaining its low discriminability for this topology contrast.
 \end{itemize}
 
+\subsection{Latent kinetic energy as a dynamical activity proxy}
+
+While speed captures the average rate of motion through state space, we can derive a complementary quantity that emphasizes intermittency and burst-like dynamics: the latent kinetic energy proxy, defined as
+\begin{equation}
+E_k(t) = \|\mathbf{v}(t)\|^2,
+\end{equation}
+where $\mathbf{v}(t)$ is the velocity vector in latent space. Although mathematically related to speed, kinetic energy emphasizes rare high-velocity events that are averaged out in mean speed, and its distributional properties (skewness, kurtosis, tail structure) capture dynamical intermittency not reflected in first-order statistics alone.
+
+\paragraph{Interpretation.}
+This quantity is explicitly \emph{not} a measure of metabolic energy consumption---scalp signals do not provide direct access to cellular energetics. Rather, $E_k(t)$ serves as a dynamical activity proxy that can be interpreted as ``reconfiguration effort'' or ``state-space mobility'': how vigorously the system traverses its manifold at each moment.
+
+Figure~\ref{fig:kinetic_energy} presents the kinetic energy analysis. Panel~A shows the energy time series colored by regime, revealing that regime structure is visible as changes in variability and burstiness, not just mean level---consistent with metastable dynamics featuring episodes of high activity embedded in quieter motion. Panel~B displays the per-regime energy distributions, showing systematic shifts with heavy tails indicating intermittent bursts. Panel~C presents the energy landscape on the 2D embedding, revealing that some regions of the manifold are energetically more demanding to traverse than others. Panel~D summarizes mean energy and coefficient of variation by regime.
+
+\begin{figure*}[t]
+    \centering
+    \includegraphics[width=1.0\textwidth]{figures/paper3/fig_kinetic_energy.png}
+    \caption{\textbf{Latent kinetic energy as a dynamical activity proxy.} (A) Kinetic energy time series $E_k(t) = \|\mathbf{v}(t)\|^2$ colored by regime, with smoothed trend (black). (B) Per-regime energy distributions showing systematic shifts and heavy tails. (C) Energy landscape: spatial distribution of mean $E_k$ on the 2D embedding, revealing regions of high vs.\ low dynamical activity. (D) Summary metrics by regime: mean energy and coefficient of variation (CV).}
+    \label{fig:kinetic_energy}
+\end{figure*}
+
+Table~\ref{tab:kinetic_energy} reports the kinetic energy metrics by regime. The ring topology shows the highest mean energy ($E_k = 0.033$) and substantial variability (CV = 0.84), indicating rapid, intermittent state-space traversal. The cluster topology shows the lowest energy ($E_k = 0.022$) and lowest variability (CV = 0.72), consistent with stable, ``resting'' dynamics. Discriminability analysis yields $\eta^2 = 0.21$ (large effect), confirming that kinetic energy captures regime-dependent structure.
+
+\begin{table}[h]
+\centering
+\caption{\textbf{Kinetic energy metrics by coupling topology.} Mean values and discriminability ($\eta^2$) for the latent kinetic energy proxy.}
+\label{tab:kinetic_energy}
+\small
+\begin{tabular}{lcccc}
+\toprule
+\textbf{Metric} & \textbf{Global} & \textbf{Cluster} & \textbf{Sparse} & \textbf{Ring} \\
+\midrule
+Mean $E_k$ & 0.024 & 0.022 & 0.027 & 0.033 \\
+CV & 0.78 & 0.72 & 0.79 & 0.84 \\
+Tail index & 0.16 & 0.15 & 0.15 & 0.16 \\
+\bottomrule
+\end{tabular}
+\vspace{0.5em}
+
+\footnotesize{Discriminability: $F = 17.7$, $p = 3.3 \times 10^{-10}$, $\eta^2 = 0.21$ (large).}
+\end{table}
+
+Notably, the kinetic energy ordering (ring $>$ sparse $>$ global $>$ cluster) differs from the speed ordering (global $>$ cluster $>$ sparse $>$ ring), indicating that these metrics capture complementary aspects of dynamical organization. Speed reflects average motion rate, while kinetic energy---being quadratic in velocity---amplifies contributions from high-velocity excursions, revealing intermittent burst structure that mean speed obscures.
+
 % =========================
 \section{Discussion}
 \label{sec:discussion}
@@ -404,9 +447,10 @@ Validation on a coupled Stuart--Landau oscillator network with topology-switchin
     \item Topology-dependent differences in latent trajectory speed ($\eta^2 = 0.51$)
     \item Systematic variation in explored variance across coupling structures ($\eta^2 = 0.52$)
     \item Regime-specific flow field patterns including differential curl/circulation
+    \item Complementary kinetic energy structure capturing dynamical intermittency ($\eta^2 = 0.21$)
 \end{itemize}
 
-Different metrics showed different sensitivity profiles: speed and variance strongly discriminated topologies, while tortuosity showed negligible discriminability for this particular contrast. This suggests that metric selection should be guided by the hypothesized nature of regime differences.
+Different metrics showed different sensitivity profiles: speed and variance strongly discriminated topologies, kinetic energy captured complementary intermittency structure, while tortuosity showed negligible discriminability for this particular contrast. This suggests that metric selection should be guided by the hypothesized nature of regime differences.
 
 \subsection{From state occupancy to trajectory laws: what the microscope adds}
 
