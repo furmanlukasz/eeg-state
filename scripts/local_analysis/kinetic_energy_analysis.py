@@ -101,6 +101,7 @@ def compute_velocity(
     delta_t: int = 1,
     savgol_window: int = 5,
     savgol_order: int = 2,
+    trim_edges: bool = True,
 ) -> np.ndarray:
     """
     Compute velocity vectors from trajectory.
@@ -111,24 +112,35 @@ def compute_velocity(
         delta_t: Time step for finite differences (samples)
         savgol_window: Window size for Savitzky-Golay (must be odd)
         savgol_order: Polynomial order for Savitzky-Golay
+        trim_edges: If True, trim edge samples affected by boundary artifacts
+                    (especially important for Savitzky-Golay)
 
     Returns:
-        velocity: (n_samples - delta_t, n_dims) velocity vectors
+        velocity: (n_samples - trim, n_dims) velocity vectors
     """
     if method == "finite_diff":
         # Simple finite difference: v(t) = x(t+dt) - x(t)
         velocity = np.diff(trajectory, n=delta_t, axis=0) / delta_t
+        # Trim edges for finite diff is minimal (delta_t samples)
+        if trim_edges and delta_t > 1:
+            velocity = velocity[delta_t:-delta_t]
     elif method == "savgol":
         # Savitzky-Golay derivative estimation (smoother)
         if savgol_window % 2 == 0:
             savgol_window += 1  # Must be odd
         if len(trajectory) <= savgol_window:
             # Fallback to finite diff if too short
-            return compute_velocity(trajectory, method="finite_diff", delta_t=delta_t)
+            return compute_velocity(trajectory, method="finite_diff", delta_t=delta_t, trim_edges=trim_edges)
         velocity = savgol_filter(
             trajectory, savgol_window, savgol_order,
             deriv=1, axis=0, mode='interp'
         )
+        # IMPORTANT: Trim edge samples affected by boundary artifacts
+        # The 'interp' mode produces artifacts at boundaries
+        # Trim at least savgol_window samples from each end to be safe
+        if trim_edges:
+            trim_n = savgol_window * 2  # Conservative: 2x window size
+            velocity = velocity[trim_n:-trim_n]
     else:
         raise ValueError(f"Unknown velocity method: {method}")
 
@@ -209,6 +221,7 @@ def compute_kinetic_energy_metrics(
     velocity_method: str = "savgol",
     savgol_window: int = 5,
     burst_threshold_pct: float = 90,
+    trim_edges: bool = True,
 ) -> KineticEnergyMetrics:
     """
     Compute comprehensive kinetic energy metrics from trajectory.
@@ -224,7 +237,7 @@ def compute_kinetic_energy_metrics(
         KineticEnergyMetrics containing all computed statistics
     """
     # Compute velocity and kinetic energy
-    velocity = compute_velocity(trajectory, method=velocity_method, savgol_window=savgol_window)
+    velocity = compute_velocity(trajectory, method=velocity_method, savgol_window=savgol_window, trim_edges=trim_edges)
     energy = compute_kinetic_energy(velocity)
 
     # Basic statistics
@@ -367,6 +380,8 @@ def compute_regime_energy_metrics(
     regime_names: List[str],
     sfreq: float = 250.0,
     velocity_method: str = "savgol",
+    savgol_window: int = 5,
+    trim_edges: bool = True,
 ) -> Dict[str, KineticEnergyMetrics]:
     """
     Compute kinetic energy metrics for each regime.
@@ -396,15 +411,21 @@ def compute_regime_energy_metrics(
             id_to_name[rid] = f"regime_{rid}"
 
     # Compute velocity once (we'll slice it per regime)
-    velocity = compute_velocity(trajectory, method=velocity_method)
+    velocity = compute_velocity(trajectory, method=velocity_method, savgol_window=savgol_window, trim_edges=trim_edges)
+
+    # Adjust regime labels to match trimmed velocity
+    # If trim_edges=True with savgol, velocity is shorter by 2*savgol_window*2 samples
+    trim_n = savgol_window * 2 if (trim_edges and velocity_method == "savgol") else 0
+    if trim_n > 0:
+        regime_labels = regime_labels[trim_n:-trim_n]
 
     # Aggregate by unique regime name
     name_to_metrics = {}
 
     for rid, name in id_to_name.items():
         mask = regime_labels == rid
-        # Adjust mask for velocity length
-        mask_vel = mask[:-1] if velocity.shape[0] == len(mask) - 1 else mask[:velocity.shape[0]]
+        # Ensure mask matches velocity length
+        mask_vel = mask[:velocity.shape[0]]
 
         if mask_vel.sum() > 50:  # Minimum samples
             regime_velocity = velocity[mask_vel]
@@ -472,6 +493,8 @@ def compute_energy_discriminability(
     regime_names: List[str],
     window_size: int = 50,
     velocity_method: str = "savgol",
+    savgol_window: int = 5,
+    trim_edges: bool = True,
 ) -> Dict[str, Dict]:
     """
     Compute per-window energy statistics for discriminability analysis.
@@ -489,11 +512,15 @@ def compute_energy_discriminability(
     from scipy.stats import f_oneway
 
     # Compute velocity and energy
-    velocity = compute_velocity(trajectory, method=velocity_method)
+    velocity = compute_velocity(trajectory, method=velocity_method, savgol_window=savgol_window, trim_edges=trim_edges)
     energy = compute_kinetic_energy(velocity)
 
-    # Adjust labels for velocity length
-    labels = regime_labels[:len(energy)]
+    # Adjust labels for trimmed velocity length
+    trim_n = savgol_window * 2 if (trim_edges and velocity_method == "savgol") else 0
+    if trim_n > 0:
+        labels = regime_labels[trim_n:-trim_n][:len(energy)]
+    else:
+        labels = regime_labels[:len(energy)]
 
     # Get unique regime names (handle duplicates from cycles)
     unique_names = list(dict.fromkeys(regime_names))
@@ -558,6 +585,8 @@ def plot_kinetic_energy_analysis(
     regime_colors: Optional[Dict[str, str]] = None,
     sfreq: float = 250.0,
     velocity_method: str = "savgol",
+    savgol_window: int = 5,
+    trim_edges: bool = True,
     output_path: Optional[Path] = None,
     show: bool = True,
 ) -> plt.Figure:
@@ -594,15 +623,21 @@ def plot_kinetic_energy_analysis(
         }
 
     # Compute velocity and energy
-    velocity = compute_velocity(trajectory, method=velocity_method)
+    velocity = compute_velocity(trajectory, method=velocity_method, savgol_window=savgol_window, trim_edges=trim_edges)
     energy = compute_kinetic_energy(velocity)
     speed = np.sqrt(energy)  # For scatter plot
 
     # Get unique regime names
     unique_names = list(dict.fromkeys(regime_names))
 
-    # Adjust labels for velocity length
-    labels = regime_labels[:len(energy)]
+    # Adjust labels for trimmed velocity length
+    trim_n = savgol_window * 2 if (trim_edges and velocity_method == "savgol") else 0
+    if trim_n > 0:
+        labels = regime_labels[trim_n:-trim_n][:len(energy)]
+        embedded = embedded[trim_n:-trim_n][:len(energy)]
+    else:
+        labels = regime_labels[:len(energy)]
+        embedded = embedded[:len(energy)]
     time = np.arange(len(energy)) / sfreq
 
     # Create figure
@@ -828,7 +863,7 @@ def run_kinetic_energy_analysis(
     print("-" * 50)
 
     global_metrics = compute_kinetic_energy_metrics(
-        latent, sfreq=sfreq, velocity_method=velocity_method, savgol_window=savgol_window
+        latent, sfreq=sfreq, velocity_method=velocity_method, savgol_window=savgol_window, trim_edges=True
     )
 
     print(f"  Mean energy: {global_metrics.mean_energy:.4f}")
@@ -845,7 +880,8 @@ def run_kinetic_energy_analysis(
     print("-" * 50)
 
     regime_metrics = compute_regime_energy_metrics(
-        latent, regime_labels, regime_names, sfreq=sfreq, velocity_method=velocity_method
+        latent, regime_labels, regime_names, sfreq=sfreq, velocity_method=velocity_method,
+        savgol_window=savgol_window, trim_edges=True
     )
 
     for name, metrics in regime_metrics.items():
@@ -860,7 +896,8 @@ def run_kinetic_energy_analysis(
     print("-" * 50)
 
     discriminability = compute_energy_discriminability(
-        latent, regime_labels, regime_names, velocity_method=velocity_method
+        latent, regime_labels, regime_names, velocity_method=velocity_method,
+        savgol_window=savgol_window, trim_edges=True
     )
 
     print(f"  F-statistic: {discriminability['f_statistic']:.1f}")
@@ -874,8 +911,9 @@ def run_kinetic_energy_analysis(
     print("Step 4: Computing Energy Landscape")
     print("-" * 50)
 
-    velocity = compute_velocity(latent, method=velocity_method)
-    embedded_for_landscape = embedded[:len(velocity)]
+    velocity = compute_velocity(latent, method=velocity_method, savgol_window=savgol_window, trim_edges=True)
+    trim_n = savgol_window * 2 if velocity_method == "savgol" else 0
+    embedded_for_landscape = embedded[trim_n:trim_n + len(velocity)] if trim_n > 0 else embedded[:len(velocity)]
     landscape = compute_energy_landscape(embedded_for_landscape, velocity)
 
     valid_cells = np.sum(~np.isnan(landscape.mean_energy))
@@ -893,6 +931,7 @@ def run_kinetic_energy_analysis(
     fig = plot_kinetic_energy_analysis(
         latent, embedded, regime_labels, regime_names,
         sfreq=sfreq, velocity_method=velocity_method,
+        savgol_window=savgol_window, trim_edges=True,
         output_path=output_dir / "fig_kinetic_energy.png",
         show=show_plots,
     )
