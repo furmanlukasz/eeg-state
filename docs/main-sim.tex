@@ -396,7 +396,7 @@ While speed captures the average rate of motion through state space, we can deri
 \begin{equation}
 E_k(t) = \|\mathbf{v}(t)\|^2,
 \end{equation}
-where $\mathbf{v}(t)$ is the velocity vector in latent space. Although mathematically related to speed, kinetic energy emphasizes rare high-velocity events that are averaged out in mean speed, and its distributional properties (skewness, kurtosis, tail structure) capture dynamical intermittency not reflected in first-order statistics alone.
+where $\mathbf{v}(t)$ is the velocity vector in latent space. Quadratic velocity functionals like $\|v\|^2$ have been used in dynamical systems to characterize activity intensity and intermittency independently of position (e.g., in turbulence and stochastic flows), making them a natural complement to first-order speed measures. Although mathematically related to speed, kinetic energy emphasizes rare high-velocity events that are averaged out in mean speed, and its distributional properties (skewness, kurtosis, tail structure) capture dynamical intermittency not reflected in first-order statistics alone.
 
 \paragraph{Interpretation.}
 This quantity is explicitly \emph{not} a measure of metabolic energy consumption---scalp signals do not provide direct access to cellular energetics. Rather, $E_k(t)$ serves as a dynamical activity proxy that can be interpreted as ``reconfiguration effort'' or ``state-space mobility'': how vigorously the system traverses its manifold at each moment.
@@ -476,7 +476,7 @@ The strong discriminability of speed and explored variance, combined with weak d
 
 Several design choices improve interpretability:
 \begin{enumerate}
-    \item \textbf{Window-based statistical testing} using non-overlapping segments ensures independent observations for ANOVA.
+    \item \textbf{Window-based statistical testing} using non-overlapping segments reduces short-timescale autocorrelation and supports descriptive ANOVA-based discriminability analysis.
     \item \textbf{Pooled embeddings} maintain a shared coordinate system for regime comparisons.
     \item \textbf{Primary metrics computed in full latent space} ensure projection invariance.
     \item \textbf{Field-level metrics} (divergence, curl) provide complementary characterization beyond point statistics.
