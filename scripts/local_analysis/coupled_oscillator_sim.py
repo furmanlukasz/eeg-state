@@ -654,8 +654,8 @@ def plot_electrode_timeseries(
     i0 = int(max(0, np.floor(t0 * fs)))
     i1 = int(min(y.shape[1], np.ceil(t1 * fs)))
 
-    fig = plt.figure(figsize=(12, 8))
-    gs = fig.add_gridspec(3, 1, height_ratios=[2.2, 1.2, 1.2], hspace=0.35)
+    fig = plt.figure(figsize=(12, 9))
+    gs = fig.add_gridspec(3, 1, height_ratios=[2.2, 1.2, 1.2], hspace=0.45)
 
     # Panel A
     ax1 = fig.add_subplot(gs[0, 0])

@@ -99,7 +99,7 @@ We adopt a trajectory-centric dynamical-systems view and introduce a framework d
 \end{itemize}
 
 \paragraph{A note on the role of the autoencoder.}
-The autoencoder serves as a nonlinear coordinate transformation, not a model of the underlying generative process; dynamical quantities are computed \emph{post hoc} and are not optimized during training (see Methods).
+The autoencoder serves as a nonlinear coordinate transformation, not a model of the underlying generative process; dynamical quantities are computed \emph{post hoc} and are not optimized during training (see Methods). We emphasize that the autoencoder is not essential to the framework; any smooth coordinate chart preserving temporal continuity (e.g., PCA, diffusion maps) could be substituted. The autoencoder is used here as a flexible nonlinear chart that improves local flow coherence, not as a generative model.
 
 \begin{figure*}[t]
     \centering
@@ -120,7 +120,7 @@ Dynamical systems theory provides a principled framework for understanding compl
 
 Deep learning has enabled representation learning for multivariate time series, including self-supervised approaches seeking transferable representations \citep{Banville2021,Kostas2021}. However, most methods are evaluated by predictive utility, with latent spaces treated as features rather than dynamical state spaces. In contrast, we use representation learning as a coordinate transformation preserving moment-to-moment variation, producing continuous trajectories for dynamical analysis rather than classification \citep{Hinton2006,CunninghamYu2014}.
 
-Related approaches couple representation learning with dynamical priors \citep{KingmaWelling2014,Pandarinath2018,Linderman2017rSLDS}, providing complementary ways to formalize latent trajectories and regime structure.
+Related approaches combine latent-variable representation learning with explicit temporal or dynamical structure, including sequential autoencoders and switching dynamical systems \citep{Pandarinath2018,Linderman2017rSLDS}, as well as generative latent-variable models that can be extended with temporal priors \citep{KingmaWelling2014}.
 
 \subsection{Trajectory-based and recurrence-based analyses}
 
@@ -139,7 +139,7 @@ To validate whether the proposed dynamical microscope recovers known dynamical s
 
 \subsubsection{Stuart--Landau oscillator dynamics}
 
-The Stuart--Landau equation describes the normal form of a Hopf bifurcation and provides a canonical model for limit-cycle oscillators:
+The Stuart--Landau equation describes the normal form of a Hopf bifurcation and provides a canonical model for limit-cycle oscillators \citep{Strogatz1994}:
 \begin{equation}
 \dot{z}_j = (\mu_j + i\omega_j)z_j - |z_j|^2 z_j + \sigma\xi_j(t) + \kappa \sum_{k} L_{jk} z_k,
 \end{equation}
@@ -239,7 +239,7 @@ Training uses pooled data from all realizations with a reconstruction-only objec
 To avoid ambiguity, we define the following terms used throughout:
 \begin{itemize}
     \item \textbf{Latent code} $\mathbf{h}(t) \in \mathbb{R}^{H}$: the autoencoder's bottleneck output at each time point (dimension $H=32$).
-    \item \textbf{Visualization embedding} $\mathbf{y}(t) \in \mathbb{R}^{d}$: a low-dimensional projection of $\mathbf{h}(t)$ for plotting and pooled analysis (typically $d=2$), obtained via UMAP.
+    \item \textbf{Visualization embedding} $\mathbf{y}(t) \in \mathbb{R}^{d}$: a low-dimensional projection of $\mathbf{h}(t)$ for plotting and pooled analysis (typically $d=2$), obtained via UMAP \citep{McInnes2018}.
     \item \textbf{Flow field}: the spatially binned average of velocity vectors $\mathbf{v}(t)$ in the visualization embedding, representing local drift direction and magnitude.
 \end{itemize}
 Primary scalar metrics (mean speed, tortuosity, explored variance) are computed in the \emph{full latent space} $\mathbf{h}(t)$ to ensure coordinate invariance, while flow field visualizations use the 2D projection $\mathbf{y}(t)$ for interpretability.
@@ -279,9 +279,9 @@ Regime discriminability is assessed using one-way ANOVA across the four topology
 \begin{equation}
 \eta^2 = \frac{SS_{\text{between}}}{SS_{\text{total}}},
 \end{equation}
-where $\eta^2 > 0.14$ indicates a large effect, $0.06$--$0.14$ medium, and $< 0.06$ small.
+where $\eta^2 > 0.14$ is commonly treated as a large effect, $0.06$--$0.14$ as medium, and $< 0.06$ as small \citep{Cohen1988}.
 
-Metrics are computed on non-overlapping windows (50 samples $\approx$ 0.2~s after 4$\times$ compression) to reduce short-timescale autocorrelation and provide approximately independent windows for descriptive discriminability analysis. Effect sizes ($\eta^2$) are reported as primary summaries rather than $p$-values alone.
+Metrics are computed on non-overlapping windows (50 samples $\approx$ 0.2~s after 4$\times$ compression) to reduce short-timescale autocorrelation and provide approximately independent windows for descriptive discriminability analysis. This windowing strategy is used to reduce short-timescale autocorrelation rather than to claim strict statistical independence. Effect sizes ($\eta^2$) are reported as primary summaries rather than $p$-values alone.
 
 % =========================
 \section{Results: Validation on Coupled Oscillator Network}
@@ -297,12 +297,12 @@ Ground-truth regime labels were used only for visualization and for stratifying 
 
 Figure~\ref{fig:main_analysis} summarizes the main validation results. Panel~A shows the ground-truth regime sequence, with rapid 10-second switching between topologies. Panel~B displays the UMAP-embedded latent trajectories colored by regime, demonstrating that while regimes occupy substantially overlapping regions of the embedding space, regime-specific clustering is still apparent.
 
-\begin{figure*}[t]
+\begin{figure}[h]
     \centering
-    \includegraphics[width=1.0\textwidth]{figures/paper3/fig_analysis_main.png}
+    \includegraphics[width=0.48\textwidth]{figures/paper3/fig_analysis_main.png}
     \caption{\textbf{Dynamical microscope analysis of coupled Stuart--Landau oscillator network.} (A) Ground-truth regime sequence: four coupling topologies (global, cluster, sparse, ring) cycling every 10~s for 160~s total. (B) UMAP-embedded latent trajectories colored by regime; regimes show substantial spatial overlap but visible clustering. (C) Density and flow field visualization showing local drift patterns across the shared manifold. (D) Normalized flow metrics by regime, demonstrating topology-dependent differences in speed, speed variability, tortuosity, and explored variance.}
     \label{fig:main_analysis}
-\end{figure*}
+\end{figure}
 
 Key observations:
 \begin{itemize}
@@ -359,12 +359,12 @@ The cluster and sparse topologies produce intermediate values, with sparse conne
 
 Figure~\ref{fig:flow_fields} shows regime-specific flow field visualizations, revealing how local drift patterns differ across coupling topologies despite occupying overlapping regions of the embedding space.
 
-\begin{figure*}[t]
+\begin{figure}[h]
     \centering
-    \includegraphics[width=1.0\textwidth]{figures/paper3/fig_flow_fields.png}
+    \includegraphics[width=0.48\textwidth]{figures/paper3/fig_flow_fields.png}
     \caption{\textbf{Regime-specific flow fields.} Each panel shows the density (background) and flow field (arrows) for trajectories within a single coupling topology. Despite substantial spatial overlap, regimes exhibit distinct local flow patterns. Divergence and curl values are annotated for each regime.}
     \label{fig:flow_fields}
-\end{figure*}
+\end{figure}
 
 Field-level metrics reveal additional structure:
 \begin{itemize}
@@ -376,12 +376,12 @@ Field-level metrics reveal additional structure:
 
 Figure~\ref{fig:discriminability} presents violin plots of per-window metric distributions, providing a visual summary of regime separability beyond mean differences.
 
-\begin{figure*}[t]
+\begin{figure}[h]
     \centering
-    \includegraphics[width=1.0\textwidth]{figures/paper3/fig_discriminability.png}
+    \includegraphics[width=0.48\textwidth]{figures/paper3/fig_discriminability.png}
     \caption{\textbf{Regime discriminability: per-window metric distributions.} Violin plots show the distribution of speed, variance, and tortuosity across non-overlapping windows for each regime. Effect sizes ($\eta^2$) and significance levels are annotated. Speed and variance show clear regime separation with large effect sizes, while tortuosity distributions overlap substantially.}
     \label{fig:discriminability}
-\end{figure*}
+\end{figure}
 
 The violin plots confirm that:
 \begin{itemize}
@@ -396,19 +396,19 @@ While speed captures the average rate of motion through state space, we can deri
 \begin{equation}
 E_k(t) = \|\mathbf{v}(t)\|^2,
 \end{equation}
-where $\mathbf{v}(t)$ is the velocity vector in latent space. Quadratic velocity functionals like $\|v\|^2$ have been used in dynamical systems to characterize activity intensity and intermittency independently of position (e.g., in turbulence and stochastic flows), making them a natural complement to first-order speed measures. Although mathematically related to speed, kinetic energy emphasizes rare high-velocity events that are averaged out in mean speed, and its distributional properties (skewness, kurtosis, tail structure) capture dynamical intermittency not reflected in first-order statistics alone.
+where $\mathbf{v}(t)$ is the velocity vector in latent space. Quadratic velocity functionals like $\|v\|^2$ have been used in dynamical systems to characterize activity intensity and intermittency independently of position, particularly in turbulence and stochastic flows \citep{Frisch1995,Falkovich2001}, making them a natural complement to first-order speed measures. Although mathematically related to speed, kinetic energy emphasizes rare high-velocity events that are averaged out in mean speed, and its distributional properties (skewness, kurtosis, tail structure) capture dynamical intermittency not reflected in first-order statistics alone.
 
 \paragraph{Interpretation.}
 This quantity is explicitly \emph{not} a measure of metabolic energy consumption---scalp signals do not provide direct access to cellular energetics. Rather, $E_k(t)$ serves as a dynamical activity proxy that can be interpreted as ``reconfiguration effort'' or ``state-space mobility'': how vigorously the system traverses its manifold at each moment.
 
 Figure~\ref{fig:kinetic_energy} presents the kinetic energy analysis. Panel~A shows the energy time series colored by regime, revealing that regime structure is visible as changes in variability and burstiness, not just mean level---consistent with intermittent dynamics featuring episodes of high activity embedded in quieter motion. Panel~B displays the per-regime energy distributions, showing systematic shifts with heavy tails indicating intermittent bursts. Panel~C presents the energy landscape: $E_k$ is computed in the full 32-dimensional latent space, then mean values are mapped to bins of the 2D visualization embedding to reveal spatial structure. This shows that some regions of the manifold are energetically more demanding to traverse than others. Panel~D summarizes mean energy and coefficient of variation by regime.
 
-\begin{figure*}[t]
+\begin{figure}[h]
     \centering
-    \includegraphics[width=1.0\textwidth]{figures/paper3/fig_kinetic_energy.png}
+    \includegraphics[width=0.48\textwidth]{figures/paper3/fig_kinetic_energy.png}
     \caption{\textbf{Latent kinetic energy as a dynamical activity proxy.} (A) Kinetic energy time series $E_k(t) = \|\mathbf{v}(t)\|^2$ colored by regime, with smoothed trend (black). (B) Per-regime energy distributions showing systematic shifts and heavy tails. (C) Energy landscape: spatial distribution of mean $E_k$ on the 2D embedding, revealing regions of high vs.\ low dynamical activity. (D) Summary metrics by regime: mean energy and coefficient of variation (CV).}
     \label{fig:kinetic_energy}
-\end{figure*}
+\end{figure}
 
 Table~\ref{tab:kinetic_energy} reports the kinetic energy metrics by regime, computed from the same velocity vectors as mean speed (ensuring $\mathbb{E}[E_k] = \mathbb{E}[\|v\|^2]$). The ring topology shows the highest mean energy ($E_k = 0.033$) and substantial variability (CV = 0.84), indicating rapid, intermittent state-space traversal. The cluster topology shows the lowest energy ($E_k = 0.022$) and lowest variability (CV = 0.72), consistent with stable, ``resting'' dynamics. Discriminability analysis yields $\eta^2 = 0.21$ (large effect), confirming that kinetic energy captures regime-dependent structure.
 
@@ -488,7 +488,7 @@ Several design choices improve interpretability:
 This study has several limitations that bound interpretation and motivate future work.
 
 \paragraph{Synthetic validation only.}
-The coupled oscillator network, while providing ground-truth regime structure, is a simplified model. Real-world systems may exhibit more complex dynamics, non-stationary noise, and regime structure not captured by topology-switching alone. Empirical validation on neural, physiological, or physical data is essential.
+The coupled oscillator network, while providing ground-truth regime structure, is a simplified model. Real-world systems may exhibit more complex dynamics, non-stationary noise, and regime structure not captured by topology-switching alone. However, the goal of this work is not to model neural data directly, but to validate a class of dynamical descriptors under conditions where ground truth is known; empirical applications are a necessary next step rather than a prerequisite for methodological soundness. Empirical validation on neural, physiological, or physical data is essential.
 
 \paragraph{Single simulation configuration.}
 Results are reported for one parameter configuration (coupling strength 5.0, 10-second regimes). Systematic exploration of parameter space would strengthen claims about robustness.
@@ -497,7 +497,7 @@ Results are reported for one parameter configuration (coupling strength 5.0, 10-
 UMAP parameters affect visualization and flow field estimation. While primary metrics are computed in the full latent space, flow field visualizations depend on embedding quality.
 
 \paragraph{Metric selection.}
-Different metrics show different sensitivity profiles. The weak discriminability of tortuosity for topology contrasts does not mean tortuosity is uninformative in general---it may be highly sensitive to other types of regime differences (e.g., stability contrasts).
+Different metrics show different sensitivity profiles. The weak discriminability of tortuosity for topology contrasts does not mean tortuosity is uninformative in general---it may be highly sensitive to other types of regime differences (e.g., stability contrasts). Not all metrics discriminate all regime contrasts; the failure of tortuosity in this setting illustrates that different metrics probe orthogonal aspects of dynamics rather than providing redundant evidence.
 
 \subsection{Future directions}
 
@@ -526,8 +526,6 @@ The dynamical microscope provides a general-purpose lens for studying non-statio
 
 % =========================
 \appendix
-\section{Implementation Details}
-\label{app:implementation}
 
 \begin{table}[h]
 \centering
@@ -710,6 +708,31 @@ P.~J. Schmid.
 S.~W. Linderman, M.~J. Johnson, A.~C. Miller, R.~P. Adams, D.~M. Blei, L.~Paninski.
 \newblock Bayesian learning and inference in recurrent switching linear dynamical systems.
 \newblock In \emph{Proceedings of the 20th International Conference on Artificial Intelligence and Statistics (AISTATS)}, PMLR 54:914--922, 2017.
+
+\bibitem[Cohen(1988)]{Cohen1988}
+J.~Cohen.
+\newblock \emph{Statistical Power Analysis for the Behavioral Sciences}.
+\newblock 2nd ed., Lawrence Erlbaum Associates, Hillsdale, NJ, 1988.
+
+\bibitem[Frisch(1995)]{Frisch1995}
+U.~Frisch.
+\newblock \emph{Turbulence: The Legacy of A.~N.~Kolmogorov}.
+\newblock Cambridge University Press, 1995.
+
+\bibitem[Falkovich et~al.(2001)]{Falkovich2001}
+G.~Falkovich, K.~Gaw\c{e}dzki, and M.~Vergassola.
+\newblock Particles and fields in fluid turbulence.
+\newblock \emph{Reviews of Modern Physics}, 73(4):913--975, 2001.
+
+\bibitem[Strogatz(1994)]{Strogatz1994}
+S.~H. Strogatz.
+\newblock \emph{Nonlinear Dynamics and Chaos}.
+\newblock Perseus Books, 1994.
+
+\bibitem[McInnes et~al.(2018)]{McInnes2018}
+L.~McInnes, J.~Healy, and J.~Melville.
+\newblock UMAP: Uniform Manifold Approximation and Projection for Dimension Reduction.
+\newblock \emph{arXiv:1802.03426}, 2018.
 
 \end{thebibliography}
 
