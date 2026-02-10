@@ -532,23 +532,7 @@ The complete implementation of the dynamical microscope framework, including sim
     \item \textbf{Interactive environment}: GitHub Codespaces with pre-configured dependencies
 \end{itemize}
 
-\noindent The repository includes:
-\begin{itemize}
-    \item Coupled Stuart--Landau oscillator simulation with configurable topologies
-    \item Flow field estimation and trajectory metric computation
-    \item Discriminability analysis with ANOVA and effect sizes
-    \item Scripts to reproduce all figures from this paper
-\end{itemize}
-
-\noindent Installation and usage:
-\begin{verbatim}
-# Clone and install
-git clone https://github.com/furmanlukasz/flowprint
-cd flowprint && uv sync
-
-# Reproduce figures
-uv run python examples/reproduce_figures.py
-\end{verbatim}
+\noindent The repository includes coupled Stuart--Landau oscillator simulation with configurable topologies, flow field estimation and trajectory metric computation, discriminability analysis, and scripts to reproduce all figures from this paper.
 
 % =========================
 \section*{Acknowledgments}
@@ -601,26 +585,6 @@ Dimensions & 2 (for visualization) \\
 Window size & 50 samples \\
 Test & One-way ANOVA \\
 Effect size & $\eta^2$ \\
-\bottomrule
-\end{tabular}
-\end{table}
-
-\begin{table}[h]
-\centering
-\caption{\textbf{Software dependencies and versions.}}
-\label{tab:software}
-\small
-\begin{tabular}{ll}
-\toprule
-\textbf{Package} & \textbf{Version} \\
-\midrule
-Python & $\geq$3.10 \\
-PyTorch & $\geq$2.0 \\
-NumPy & $\geq$1.21 \\
-SciPy & $\geq$1.7 \\
-scikit-learn & $\geq$1.0 \\
-UMAP-learn & $\geq$0.5.6 \\
-Matplotlib & $\geq$3.5 \\
 \bottomrule
 \end{tabular}
 \end{table}
