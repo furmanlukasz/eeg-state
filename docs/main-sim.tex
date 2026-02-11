@@ -212,7 +212,7 @@ Figure~\ref{fig:electrode_demo} illustrates the raw observations from the couple
 
 \subsection{Preprocessing and circular phase--amplitude representation}
 
-Let $\mathbf{x}(t) \in \mathbb{R}^{C}$ denote the multichannel signal. After bandpass filtering (2--48~Hz, zero-phase FIR filter), the analytic signal for each channel is obtained via the Hilbert transform applied to the continuous signal, yielding instantaneous phase $\phi_c(t)$ and amplitude $a_c(t)$ \citep{Boashash1992}.
+Let $\mathbf{x}(t) \in \mathbb{R}^{C}$ denote the multichannel signal. After bandpass filtering (1--30~Hz, 4th-order Butterworth, zero-phase via \texttt{filtfilt}), the analytic signal for each channel is obtained via the Hilbert transform applied to the continuous signal, yielding instantaneous phase $\phi_c(t)$ and amplitude $a_c(t)$ \citep{Boashash1992}.
 
 Instantaneous phase and amplitude are widely used to quantify oscillatory coordination and cross-frequency interactions, and provide a natural starting point for trajectory-centric representations \citep{Canolty2006,Tort2010}.
 
@@ -556,7 +556,7 @@ Channels $C$ & 30 \\
 Oscillators & 30 \\
 \midrule
 \multicolumn{2}{l}{\emph{Preprocessing}} \\
-Bandpass filter & 2--48~Hz, zero-phase FIR \\
+Bandpass filter & 1--30~Hz, 4th-order Butterworth, zero-phase \\
 \midrule
 \multicolumn{2}{l}{\emph{Hilbert extraction}} \\
 Applied to & Continuous data per channel \\
