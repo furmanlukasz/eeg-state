@@ -79,6 +79,16 @@ hmm = [
     "hmmlearn>=0.3",
     "pycrostates>=0.6",
 ]
+flowprint = [
+    # FlowPrint: dynamical microscope for oscillatory signals
+    # Install from GitHub: pip install eeg-biomarkers[flowprint]
+    # Or local dev:  pip install -e /path/to/flowprint
+    "flowprint @ git+https://github.com/furmanlukasz/flowprint.git",
+]
+benchmarks = [
+    # Benchmark harness dependencies (beyond core)
+    "tabulate>=0.9",
+]
 
 [project.scripts]
 eeg-train = "eeg_biomarkers.training.train:main"
